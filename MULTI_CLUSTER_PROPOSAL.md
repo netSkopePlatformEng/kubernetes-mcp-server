@@ -4,6 +4,8 @@
 
 This proposal outlines the implementation of multi-cluster support for the Kubernetes MCP Server, specifically designed to work with Rancher-managed clusters and the NSK tool. The solution enables AI agents to interact with multiple Kubernetes clusters by reading kubeconfig files from a directory and providing cluster switching capabilities.
 
+**Target Kubernetes Version**: v1.24.17 (all components and dependencies must be compatible with this version)
+
 ## Current State Analysis
 
 ### Existing Architecture

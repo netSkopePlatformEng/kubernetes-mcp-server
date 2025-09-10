@@ -4,6 +4,8 @@
 
 This proposal adds comprehensive kubectl plugin support to the Kubernetes MCP Server, enabling AI agents to discover, execute, and manage kubectl plugins seamlessly. The integration provides automatic plugin discovery, dynamic MCP tool generation, and secure execution within the multi-cluster environment.
 
+**Target Kubernetes Version**: v1.24.17 (all components and dependencies must be compatible with this version)
+
 ## Kubectl Plugin Architecture Analysis
 
 ### Plugin Discovery Mechanism

@@ -9,9 +9,13 @@ This is a fork of the Kubernetes MCP Server project, extended to support Rancher
 ### Key Technologies
 - **Go 1.24.1** - Main programming language
 - **Model Context Protocol (MCP)** - Protocol for AI agent interaction
-- **Kubernetes client-go** - Official Kubernetes Go client library
+- **Kubernetes client-go** - Official Kubernetes Go client library (target: v1.24.17 compatibility)
 - **Helm v3** - Kubernetes package manager integration
 - **mark3labs/mcp-go** - Go implementation of MCP protocol
+
+### Version Requirements
+- **Target Kubernetes Version**: v1.24.17
+- **Note**: Current go.mod uses k8s.io/* v0.34.0 dependencies, but should be downgraded to match v1.24.17 cluster compatibility
 
 ### Rancher Integration Context
 The NSK (Netskope Kubernetes) tool in `/Users/jdambly/repos/nsk` is used to download kubeconfig files for multiple clusters from Rancher. Key concepts:

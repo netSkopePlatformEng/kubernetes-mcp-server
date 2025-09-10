@@ -4,6 +4,8 @@
 
 This proposal outlines the integration of Teleport access management with the Kubernetes MCP Server, enabling secure, audited, and identity-aware access to multiple Kubernetes clusters across different environments (Commercial, FedRAMP, PBMM). The integration leverages Teleport's authentication, authorization, and session management capabilities to provide enterprise-grade security for AI agent interactions.
 
+**Target Kubernetes Version**: v1.24.17 (all components and dependencies must be compatible with this version)
+
 ## Current Teleport Environment Analysis
 
 Based on system analysis, the environment includes:

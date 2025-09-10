@@ -4,6 +4,8 @@
 
 This proposal outlines the development of a `kubectl-kubelet-logs` plugin that enables AI agents and operators to retrieve kubelet logs directly through the Kubernetes API, providing simultaneous access to kubelet diagnostics and API state for comprehensive troubleshooting. The plugin integrates seamlessly with the existing Kubernetes MCP server architecture and provides enhanced debugging capabilities for node-level issues.
 
+**Target Kubernetes Version**: v1.24.17 (all components and dependencies must be compatible with this version)
+
 ## Problem Statement
 
 ### Current Challenges

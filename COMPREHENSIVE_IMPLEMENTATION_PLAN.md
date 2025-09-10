@@ -4,6 +4,8 @@
 
 This document consolidates all proposed enhancements for transforming the Kubernetes MCP Server into a comprehensive enterprise platform. The plan integrates four major enhancement areas: multi-cluster support with NSK integration, kubectl plugin ecosystem, Teleport authentication, and enterprise deployment strategies.
 
+**Target Kubernetes Version**: v1.24.17 (all components, dependencies, and tools must be compatible with this version)
+
 ## Table of Contents
 
 1. [Overview and Architecture](#overview-and-architecture)
@@ -369,7 +371,7 @@ RUN curl -L -O https://cdn.teleport.dev/teleport-v${TELEPORT_VERSION}-linux-amd6
     && rm -rf teleport teleport-v${TELEPORT_VERSION}-linux-amd64-bin.tar.gz
 
 # Install kubectl
-ARG KUBECTL_VERSION=v1.29.1
+ARG KUBECTL_VERSION=v1.24.17
 RUN curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
     && chmod +x kubectl \
     && mv kubectl /usr/local/bin/
