@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/BurntSushi/toml"
@@ -14,7 +15,18 @@ type StaticConfig struct {
 	LogLevel   int    `toml:"log_level,omitempty"`
 	Port       string `toml:"port,omitempty"`
 	SSEBaseURL string `toml:"sse_base_url,omitempty"`
+	// Legacy single kubeconfig support (deprecated in favor of multi-cluster)
 	KubeConfig string `toml:"kubeconfig,omitempty"`
+	
+	// Multi-cluster configuration
+	KubeConfigDir     string            `toml:"kubeconfig_dir,omitempty"`
+	DefaultCluster    string            `toml:"default_cluster,omitempty"`
+	AutoDiscovery     bool              `toml:"auto_discovery,omitempty"`
+	ClusterAliases    map[string]string `toml:"cluster_aliases,omitempty"`
+	
+	// NSK Integration
+	NSKIntegration    *NSKConfig        `toml:"nsk,omitempty"`
+	
 	ListOutput string `toml:"list_output,omitempty"`
 	// When true, expose only tools annotated with readOnlyHint=true
 	ReadOnly bool `toml:"read_only,omitempty"`
@@ -56,6 +68,31 @@ type GroupVersionKind struct {
 	Kind    string `toml:"kind,omitempty"`
 }
 
+// NSKConfig represents configuration for NSK (Netskope Kubernetes) tool integration
+type NSKConfig struct {
+	// Core NSK settings
+	Enabled           bool     `toml:"enabled,omitempty"`
+	NSKPath           string   `toml:"nsk_path,omitempty"`           // Path to NSK binary, defaults to "nsk"
+	
+	// Rancher environment settings
+	RancherURL        string   `toml:"rancher_url,omitempty"`
+	RancherToken      string   `toml:"rancher_token,omitempty"`
+	Profile           string   `toml:"profile,omitempty"`
+	ConfigDir         string   `toml:"config_dir,omitempty"`
+	
+	// Auto-refresh settings
+	AutoRefresh       bool     `toml:"auto_refresh,omitempty"`
+	RefreshInterval   string   `toml:"refresh_interval,omitempty"`  // e.g., "1h", "30m"
+	
+	// Cluster filtering
+	ClusterPattern    string   `toml:"cluster_pattern,omitempty"`   // Regex pattern for cluster names
+	ExcludeClusters   []string `toml:"exclude_clusters,omitempty"`
+	IncludeClusters   []string `toml:"include_clusters,omitempty"`
+	
+	// Environment variables for NSK execution
+	Environment       map[string]string `toml:"environment,omitempty"`
+}
+
 // ReadConfig reads the toml file and returns the StaticConfig.
 func ReadConfig(configPath string) (*StaticConfig, error) {
 	configData, err := os.ReadFile(configPath)
@@ -69,4 +106,27 @@ func ReadConfig(configPath string) (*StaticConfig, error) {
 		return nil, err
 	}
 	return config, nil
+}
+
+// ValidateMultiClusterConfig validates the multi-cluster configuration
+func (c *StaticConfig) ValidateMultiClusterConfig() error {
+	if c.KubeConfigDir == "" && c.KubeConfig == "" {
+		return fmt.Errorf("either kubeconfig_dir or kubeconfig must be specified")
+	}
+	
+	if c.KubeConfigDir != "" && c.KubeConfig != "" {
+		return fmt.Errorf("cannot specify both kubeconfig_dir and kubeconfig")
+	}
+	
+	return nil
+}
+
+// IsMultiClusterEnabled returns true if multi-cluster mode is enabled
+func (c *StaticConfig) IsMultiClusterEnabled() bool {
+	return c.KubeConfigDir != ""
+}
+
+// IsNSKEnabled returns true if NSK integration is enabled
+func (c *StaticConfig) IsNSKEnabled() bool {
+	return c.NSKIntegration != nil && c.NSKIntegration.Enabled
 }

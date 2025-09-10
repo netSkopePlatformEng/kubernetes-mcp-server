@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,7 +39,8 @@ const (
 type CloseWatchKubeConfig func() error
 
 type Kubernetes struct {
-	manager *Manager
+	manager            *Manager
+	multiClusterManager *MultiClusterManager
 }
 
 type Manager struct {
@@ -84,6 +86,95 @@ func NewManager(config *config.StaticConfig) (*Manager, error) {
 		return nil, err
 	}
 	return k8s, nil
+}
+
+// NewKubernetes creates a new Kubernetes instance with either single or multi-cluster support
+func NewKubernetes(config *config.StaticConfig, logger klog.Logger) (*Kubernetes, error) {
+	k8s := &Kubernetes{}
+
+	if config.IsMultiClusterEnabled() {
+		// Multi-cluster mode
+		var err error
+		k8s.multiClusterManager, err = NewMultiClusterManager(config, logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create multi-cluster manager: %w", err)
+		}
+		
+		// Start the multi-cluster manager to discover clusters
+		ctx := context.Background()
+		if err := k8s.multiClusterManager.Start(ctx); err != nil {
+			return nil, fmt.Errorf("failed to start multi-cluster manager: %w", err)
+		}
+	} else {
+		// Single-cluster mode (legacy)
+		var err error
+		k8s.manager, err = NewManager(config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create manager: %w", err)
+		}
+	}
+
+	return k8s, nil
+}
+
+// IsMultiCluster returns true if this Kubernetes instance is in multi-cluster mode
+func (k *Kubernetes) IsMultiCluster() bool {
+	return k.multiClusterManager != nil
+}
+
+// GetManager returns the appropriate manager for the current context
+func (k *Kubernetes) GetManager() (*Manager, error) {
+	if k.IsMultiCluster() {
+		return k.multiClusterManager.GetActiveManager()
+	}
+	return k.manager, nil
+}
+
+// GetManagerForCluster returns the manager for a specific cluster (multi-cluster mode only)
+func (k *Kubernetes) GetManagerForCluster(clusterName string) (*Manager, error) {
+	if !k.IsMultiCluster() {
+		return nil, fmt.Errorf("not in multi-cluster mode")
+	}
+	return k.multiClusterManager.GetManager(clusterName)
+}
+
+// SwitchCluster switches to a different cluster (multi-cluster mode only)
+func (k *Kubernetes) SwitchCluster(clusterName string) error {
+	if !k.IsMultiCluster() {
+		return fmt.Errorf("not in multi-cluster mode")
+	}
+	return k.multiClusterManager.SwitchCluster(clusterName)
+}
+
+// GetActiveCluster returns the currently active cluster name (multi-cluster mode only)
+func (k *Kubernetes) GetActiveCluster() string {
+	if !k.IsMultiCluster() {
+		return ""
+	}
+	return k.multiClusterManager.GetActiveCluster()
+}
+
+// ListClusters returns all available clusters (multi-cluster mode only)
+func (k *Kubernetes) ListClusters() []ClusterConfig {
+	if !k.IsMultiCluster() {
+		return nil
+	}
+	return k.multiClusterManager.ListClusters()
+}
+
+// StartMultiCluster starts the multi-cluster manager (multi-cluster mode only)
+func (k *Kubernetes) StartMultiCluster(ctx context.Context) error {
+	if !k.IsMultiCluster() {
+		return fmt.Errorf("not in multi-cluster mode")
+	}
+	return k.multiClusterManager.Start(ctx)
+}
+
+// StopMultiCluster stops the multi-cluster manager (multi-cluster mode only)
+func (k *Kubernetes) StopMultiCluster() {
+	if k.IsMultiCluster() {
+		k.multiClusterManager.Stop()
+	}
 }
 
 func (m *Manager) WatchKubeConfig(onKubeConfigChange func() error) {
