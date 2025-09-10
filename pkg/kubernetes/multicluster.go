@@ -21,6 +21,7 @@ type MultiClusterManager struct {
 	clusters       map[string]*Manager
 	activeCluster  string
 	nskManager     *nsk.Manager
+	healthMonitor  *ClusterHealthMonitor
 	logger         klog.Logger
 	mutex          sync.RWMutex
 }
@@ -56,6 +57,10 @@ func NewMultiClusterManager(staticConfig *config.StaticConfig, logger klog.Logge
 		}
 	}
 
+	// Initialize health monitor
+	healthConfig := DefaultClusterHealthConfig()
+	mcm.healthMonitor = NewClusterHealthMonitor(healthConfig, logger, mcm.performHealthCheck)
+
 	return mcm, nil
 }
 
@@ -74,6 +79,13 @@ func (mcm *MultiClusterManager) Start(ctx context.Context) error {
 	if err := mcm.DiscoverClusters(ctx); err != nil {
 		return fmt.Errorf("cluster discovery failed: %w", err)
 	}
+
+	// Start health monitoring for discovered clusters
+	clusterNames := make([]string, 0, len(mcm.clusters))
+	for name := range mcm.clusters {
+		clusterNames = append(clusterNames, name)
+	}
+	mcm.healthMonitor.Start(ctx, clusterNames)
 
 	// Set default cluster if specified
 	if mcm.staticConfig.DefaultCluster != "" {
@@ -96,9 +108,22 @@ func (mcm *MultiClusterManager) Start(ctx context.Context) error {
 func (mcm *MultiClusterManager) Stop() {
 	mcm.logger.Info("Stopping multi-cluster manager")
 
+	if mcm.healthMonitor != nil {
+		mcm.healthMonitor.Stop()
+	}
+
 	if mcm.nskManager != nil {
 		mcm.nskManager.Stop()
 	}
+
+	// Clean up all cluster managers
+	mcm.mutex.Lock()
+	for name, manager := range mcm.clusters {
+		mcm.logger.V(2).Info("Closing cluster manager", "cluster", name)
+		manager.Close()
+	}
+	mcm.clusters = make(map[string]*Manager)
+	mcm.mutex.Unlock()
 
 	mcm.logger.Info("Multi-cluster manager stopped")
 }
@@ -140,8 +165,36 @@ func (mcm *MultiClusterManager) DiscoverClusters(ctx context.Context) error {
 	}
 
 	mcm.mutex.Lock()
+	oldClusters := mcm.clusters
 	mcm.clusters = newClusters
 	mcm.mutex.Unlock()
+
+	// Clean up removed clusters and update health monitoring
+	if mcm.healthMonitor != nil {
+		// Remove clusters that are no longer available
+		for oldCluster, oldManager := range oldClusters {
+			if _, exists := newClusters[oldCluster]; !exists {
+				mcm.logger.V(2).Info("Cleaning up removed cluster", "cluster", oldCluster)
+				mcm.healthMonitor.RemoveCluster(oldCluster)
+				oldManager.Close()
+			}
+		}
+		
+		// Add new clusters to monitoring
+		for newCluster := range newClusters {
+			if _, exists := oldClusters[newCluster]; !exists {
+				mcm.healthMonitor.AddCluster(newCluster)
+			}
+		}
+	} else {
+		// Just clean up removed clusters if no health monitoring
+		for oldCluster, oldManager := range oldClusters {
+			if _, exists := newClusters[oldCluster]; !exists {
+				mcm.logger.V(2).Info("Cleaning up removed cluster", "cluster", oldCluster)
+				oldManager.Close()
+			}
+		}
+	}
 
 	mcm.logger.V(2).Info("Cluster discovery completed", "count", len(newClusters))
 	return nil
@@ -364,4 +417,58 @@ func (mcm *MultiClusterManager) GetNSKStatus() *nsk.ManagerStatus {
 		return nil
 	}
 	return mcm.nskManager.GetStatus()
+}
+
+// performHealthCheck performs a health check on a specific cluster
+func (mcm *MultiClusterManager) performHealthCheck(ctx context.Context, cluster string) error {
+	manager, err := mcm.GetManager(cluster)
+	if err != nil {
+		return fmt.Errorf("failed to get manager for cluster %s: %w", cluster, err)
+	}
+
+	// Try to create a Kubernetes client and perform a simple API call
+	client, err := manager.CreateClient()
+	if err != nil {
+		return fmt.Errorf("failed to create client for cluster %s: %w", cluster, err)
+	}
+
+	// Perform a simple API call to check cluster health
+	_, err = client.Discovery().ServerVersion()
+	if err != nil {
+		return fmt.Errorf("cluster %s health check failed: %w", cluster, err)
+	}
+
+	return nil
+}
+
+// IsClusterHealthy returns true if the cluster is healthy
+func (mcm *MultiClusterManager) IsClusterHealthy(cluster string) bool {
+	if mcm.healthMonitor == nil {
+		return true // Assume healthy if monitoring is disabled
+	}
+	return mcm.healthMonitor.IsHealthy(cluster)
+}
+
+// GetClusterHealth returns the health status of a specific cluster
+func (mcm *MultiClusterManager) GetClusterHealth(cluster string) (*ClusterHealthStatus, bool) {
+	if mcm.healthMonitor == nil {
+		return nil, false
+	}
+	return mcm.healthMonitor.GetClusterStatus(cluster)
+}
+
+// GetAllClusterHealth returns the health status of all clusters
+func (mcm *MultiClusterManager) GetAllClusterHealth() map[string]ClusterHealthStatus {
+	if mcm.healthMonitor == nil {
+		return make(map[string]ClusterHealthStatus)
+	}
+	return mcm.healthMonitor.GetAllStatuses()
+}
+
+// GetHealthySummary returns a summary of healthy vs total clusters
+func (mcm *MultiClusterManager) GetHealthySummary() (healthy, total int) {
+	if mcm.healthMonitor == nil {
+		return len(mcm.clusters), len(mcm.clusters)
+	}
+	return mcm.healthMonitor.GetHealthySummary()
 }

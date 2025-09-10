@@ -25,6 +25,11 @@ type NSKClient struct {
 	lastRefresh  time.Time
 	clusters     map[string]*ClusterInfo
 	mutex        sync.RWMutex
+	
+	// Resource cleanup
+	ctx          context.Context
+	cancel       context.CancelFunc
+	cleanupFuncs []func() error
 }
 
 // ClusterInfo represents information about a discovered cluster
@@ -50,6 +55,30 @@ type NSKCluster struct {
 	Description string `json:"description"`
 }
 
+// sanitizeClusterName sanitizes cluster names to prevent command injection
+// Only allows alphanumeric characters, dashes, underscores, and dots
+func sanitizeClusterName(name string) string {
+	if name == "" {
+		return ""
+	}
+	
+	// Allow only safe characters: alphanumeric, dash, underscore, dot
+	reg := regexp.MustCompile("[^a-zA-Z0-9_.-]")
+	sanitized := reg.ReplaceAllString(name, "")
+	
+	// Ensure the name is not empty after sanitization
+	if sanitized == "" {
+		return "invalid-cluster-name"
+	}
+	
+	// Limit length to prevent excessive resource usage
+	if len(sanitized) > 128 {
+		sanitized = sanitized[:128]
+	}
+	
+	return sanitized
+}
+
 // NewNSKClient creates a new NSK client with the given configuration
 func NewNSKClient(config *config.NSKConfig, logger klog.Logger) (*NSKClient, error) {
 	if config == nil {
@@ -66,11 +95,15 @@ func NewNSKClient(config *config.NSKConfig, logger klog.Logger) (*NSKClient, err
 		return nil, fmt.Errorf("NSK binary not found in PATH: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	client := &NSKClient{
-		config:   config,
-		nskPath:  nskPath,
-		logger:   logger,
-		clusters: make(map[string]*ClusterInfo),
+		config:       config,
+		nskPath:      nskPath,
+		logger:       logger,
+		clusters:     make(map[string]*ClusterInfo),
+		ctx:          ctx,
+		cancel:       cancel,
+		cleanupFuncs: make([]func() error, 0),
 	}
 
 	// Ensure config directory exists
@@ -87,8 +120,17 @@ func NewNSKClient(config *config.NSKConfig, logger klog.Logger) (*NSKClient, err
 func (c *NSKClient) DiscoverClusters(ctx context.Context) error {
 	c.logger.V(2).Info("Discovering clusters via NSK")
 
+	// Use the more restrictive context
+	useCtx := ctx
+	if c.ctx.Err() != nil {
+		return fmt.Errorf("NSK client is closed")
+	}
+	if ctx.Err() != nil {
+		useCtx = c.ctx
+	}
+	
 	// Execute nsk cluster list --output json
-	cmd := exec.CommandContext(ctx, c.nskPath, "cluster", "list", "--output", "json")
+	cmd := exec.CommandContext(useCtx, c.nskPath, "cluster", "list", "--output", "json")
 	
 	// Set environment variables
 	env := c.buildEnvironment()
@@ -167,9 +209,29 @@ func (c *NSKClient) DownloadKubeConfigs(ctx context.Context) error {
 
 // downloadClusterKubeConfig downloads kubeconfig for a specific cluster
 func (c *NSKClient) downloadClusterKubeConfig(ctx context.Context, clusterName, outputPath string) error {
+	// Sanitize cluster name to prevent command injection
+	sanitizedClusterName := sanitizeClusterName(clusterName)
+	if sanitizedClusterName != clusterName {
+		c.logger.V(1).Info("Cluster name was sanitized", "original", clusterName, "sanitized", sanitizedClusterName)
+	}
+	
+	// Validate output path to prevent path traversal
+	if !filepath.IsAbs(outputPath) || strings.Contains(outputPath, "..") {
+		return fmt.Errorf("invalid output path: %s", outputPath)
+	}
+	
+	// Use the more restrictive context
+	useCtx := ctx
+	if c.ctx.Err() != nil {
+		return fmt.Errorf("NSK client is closed")
+	}
+	if ctx.Err() != nil {
+		useCtx = c.ctx
+	}
+	
 	// Execute nsk cluster kubeconfig --name=<cluster> --output=<path>
-	cmd := exec.CommandContext(ctx, c.nskPath, "cluster", "kubeconfig", 
-		fmt.Sprintf("--name=%s", clusterName),
+	cmd := exec.CommandContext(useCtx, c.nskPath, "cluster", "kubeconfig", 
+		fmt.Sprintf("--name=%s", sanitizedClusterName),
 		fmt.Sprintf("--output=%s", outputPath))
 
 	// Set environment variables
@@ -331,6 +393,43 @@ func (c *NSKClient) buildEnvironment() []string {
 	}
 
 	return env
+}
+
+// Close properly closes the NSK client and cleans up resources
+func (c *NSKClient) Close() error {
+	// Cancel context to stop any running operations
+	if c.cancel != nil {
+		c.cancel()
+	}
+	
+	// Run all cleanup functions
+	var errors []error
+	for _, cleanup := range c.cleanupFuncs {
+		if err := cleanup(); err != nil {
+			errors = append(errors, err)
+		}
+	}
+	
+	// Clear clusters map
+	c.mutex.Lock()
+	c.clusters = make(map[string]*ClusterInfo)
+	c.mutex.Unlock()
+	
+	if len(errors) > 0 {
+		return fmt.Errorf("cleanup errors: %v", errors)
+	}
+	
+	return nil
+}
+
+// RegisterCleanup registers a cleanup function to be called when the client is closed
+func (c *NSKClient) RegisterCleanup(cleanup func() error) {
+	c.cleanupFuncs = append(c.cleanupFuncs, cleanup)
+}
+
+// GetContext returns the client's context for long-running operations
+func (c *NSKClient) GetContext() context.Context {
+	return c.ctx
 }
 
 // IsHealthy performs a basic health check of the NSK integration

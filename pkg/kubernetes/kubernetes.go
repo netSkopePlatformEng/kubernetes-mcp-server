@@ -53,6 +53,11 @@ type Manager struct {
 
 	staticConfig         *config.StaticConfig
 	CloseWatchKubeConfig CloseWatchKubeConfig
+	
+	// Resource cleanup
+	ctx           context.Context
+	cancel        context.CancelFunc
+	cleanupFuncs  []func() error
 }
 
 var Scheme = scheme.Scheme
@@ -61,8 +66,12 @@ var ParameterCodec = runtime.NewParameterCodec(Scheme)
 var _ helm.Kubernetes = &Manager{}
 
 func NewManager(config *config.StaticConfig) (*Manager, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	k8s := &Manager{
 		staticConfig: config,
+		ctx:          ctx,
+		cancel:       cancel,
+		cleanupFuncs: make([]func() error, 0),
 	}
 	if err := resolveKubernetesConfigurations(k8s); err != nil {
 		return nil, err
@@ -177,6 +186,15 @@ func (k *Kubernetes) StopMultiCluster() {
 	}
 }
 
+// Close properly closes the Kubernetes instance and all its resources
+func (k *Kubernetes) Close() {
+	if k.IsMultiCluster() {
+		k.multiClusterManager.Stop()
+	} else if k.manager != nil {
+		k.manager.Close()
+	}
+}
+
 func (m *Manager) WatchKubeConfig(onKubeConfigChange func() error) {
 	if m.clientCmdConfig == nil {
 		return
@@ -193,8 +211,11 @@ func (m *Manager) WatchKubeConfig(onKubeConfigChange func() error) {
 		_ = watcher.Add(file)
 	}
 	go func() {
+		defer watcher.Close()
 		for {
 			select {
+			case <-m.ctx.Done():
+				return
 			case _, ok := <-watcher.Events:
 				if !ok {
 					return
@@ -214,9 +235,38 @@ func (m *Manager) WatchKubeConfig(onKubeConfigChange func() error) {
 }
 
 func (m *Manager) Close() {
+	// Cancel context to stop all goroutines
+	if m.cancel != nil {
+		m.cancel()
+	}
+	
+	// Run all cleanup functions
+	for _, cleanup := range m.cleanupFuncs {
+		if err := cleanup(); err != nil {
+			// Log error but continue with other cleanups
+			klog.Errorf("Error during cleanup: %v", err)
+		}
+	}
+	
+	// Close kubeconfig watcher
 	if m.CloseWatchKubeConfig != nil {
 		_ = m.CloseWatchKubeConfig()
 	}
+	
+	// Clear discovery cache to free memory
+	if m.discoveryClient != nil {
+		m.discoveryClient.Invalidate()
+	}
+}
+
+// RegisterCleanup registers a cleanup function to be called when the manager is closed
+func (m *Manager) RegisterCleanup(cleanup func() error) {
+	m.cleanupFuncs = append(m.cleanupFuncs, cleanup)
+}
+
+// GetContext returns the manager's context for long-running operations
+func (m *Manager) GetContext() context.Context {
+	return m.ctx
 }
 
 func (m *Manager) GetAPIServerHost() string {
