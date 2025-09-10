@@ -29,11 +29,34 @@ type StaticConfig struct {
     // Existing fields...
     KubeConfig string `toml:"kubeconfig,omitempty"`
     
-    // New multi-cluster fields
+    // Enhanced multi-cluster with NSK integration
     KubeConfigDir     string   `toml:"kubeconfig_dir,omitempty"`
     DefaultCluster    string   `toml:"default_cluster,omitempty"`
     ClusterAliases    map[string]string `toml:"cluster_aliases,omitempty"`
     AutoDiscovery     bool     `toml:"auto_discovery,omitempty"`
+    
+    // NSK Integration Configuration
+    NSKIntegration    *NSKConfig `toml:"nsk,omitempty"`
+}
+
+type NSKConfig struct {
+    // Core Rancher Environment
+    RancherURL        string `toml:"rancher_url,omitempty"`
+    RancherToken      string `toml:"rancher_token,omitempty"`
+    RancherInsecure   bool   `toml:"rancher_insecure,omitempty"`
+    Profile           string `toml:"profile,omitempty"`
+    ConfigDir         string `toml:"config_dir,omitempty"`
+    
+    // Auto-refresh settings
+    AutoRefresh       bool   `toml:"auto_refresh,omitempty"`
+    RefreshInterval   string `toml:"refresh_interval,omitempty"` // e.g., "1h", "30m"
+    
+    // NSK command path
+    NSKPath           string `toml:"nsk_path,omitempty"` // default: "nsk"
+    
+    // Cluster filtering
+    ClusterPattern    string   `toml:"cluster_pattern,omitempty"` // regex pattern for cluster names
+    ExcludeClusters   []string `toml:"exclude_clusters,omitempty"`
 }
 ```
 
@@ -99,6 +122,38 @@ func (s *Server) initClusters() []server.ServerTool {
             mcp.WithTitleAnnotation("Clusters: Execute on All"),
             mcp.WithReadOnlyHintAnnotation(false),
         ), Handler: s.clustersExecAll},
+    }
+}
+```
+
+#### NSK Integration Tools
+```go
+// pkg/mcp/nsk.go
+func (s *Server) initNSKTools() []server.ServerTool {
+    if s.nsk == nil {
+        return nil // NSK integration not configured
+    }
+    
+    return []server.ServerTool{
+        {Tool: mcp.NewTool("nsk_refresh",
+            mcp.WithDescription("Manually refresh kubeconfig files from Rancher via NSK"),
+            mcp.WithBoolean("force", mcp.Description("Force refresh even if recent refresh occurred")),
+            mcp.WithTitleAnnotation("NSK: Refresh Kubeconfigs"),
+            mcp.WithReadOnlyHintAnnotation(false),
+        ), Handler: s.nskRefresh},
+        
+        {Tool: mcp.NewTool("nsk_status",
+            mcp.WithDescription("Get NSK integration status and last refresh time"),
+            mcp.WithTitleAnnotation("NSK: Integration Status"),
+            mcp.WithReadOnlyHintAnnotation(true),
+        ), Handler: s.nskStatus},
+        
+        {Tool: mcp.NewTool("nsk_clusters_discover",
+            mcp.WithDescription("Discover new clusters from Rancher and update kubeconfigs"),
+            mcp.WithString("pattern", mcp.Description("Cluster name pattern to filter")),
+            mcp.WithTitleAnnotation("NSK: Discover Clusters"),
+            mcp.WithReadOnlyHintAnnotation(false),
+        ), Handler: s.nskClustersDiscover},
     }
 }
 ```
@@ -229,26 +284,87 @@ func (nsk *NSKIntegration) GetClusterList() ([]string, error)
 
 ## Configuration Examples
 
-### Basic Multi-Cluster Setup
+### Environment-Specific Multi-Cluster Setup
+
+#### Production Environment
 ```toml
-# config.toml
-kubeconfig_dir = "~/.nsk"
-default_cluster = "c1-am2"
+# config-production.toml
+[nsk]
+rancher_url = "https://rancher.netskope.io"
+rancher_token = "${PROD_RANCHER_TOKEN}"
+profile = "prod"
+config_dir = "/etc/kubernetes/clusters/prod"
+auto_refresh = true
+refresh_interval = "1h"
+cluster_pattern = "^c1-.*"
+
+kubeconfig_dir = "/etc/kubernetes/clusters/prod"
+default_cluster = "c1-sv5"
 auto_discovery = true
 
 [cluster_aliases]
 "production" = "c1-sv5"
-"staging" = "c1-dfw1"
-"development" = "local"
+"prod-west" = "c1-lax1"
+"prod-east" = "c1-dfw1"
+```
+
+#### Staging Environment
+```toml
+# config-staging.toml
+[nsk]
+rancher_url = "https://rancher.prime.iad0.netskope.com"
+rancher_token = "${STAGING_RANCHER_TOKEN}"
+profile = "staging"
+config_dir = "/etc/kubernetes/clusters/staging"
+auto_refresh = true
+refresh_interval = "30m"
+
+kubeconfig_dir = "/etc/kubernetes/clusters/staging"
+default_cluster = "iad0-sandbox"
+auto_discovery = true
+```
+
+#### Development Environment
+```toml
+# config-development.toml
+[nsk]
+rancher_url = "https://rancher-dev.netskope.io"
+rancher_token = "${DEV_RANCHER_TOKEN}"
+profile = "dev"
+config_dir = "/etc/kubernetes/clusters/dev"
+auto_refresh = true
+refresh_interval = "15m"
+exclude_clusters = ["legacy-cluster", "deprecated-test"]
+
+kubeconfig_dir = "/etc/kubernetes/clusters/dev"
+default_cluster = "dev-cluster"
+auto_discovery = true
 ```
 
 ### Command Line Usage
 ```bash
-# Start with kubeconfig directory
-kubernetes-mcp-server --kubeconfig-dir ~/.nsk --default-cluster c1-am2
+# Production MCP server
+kubernetes-mcp-server --config config-production.toml --port 8080
 
-# Start with configuration file
-kubernetes-mcp-server --config multi-cluster.toml --port 8080
+# Development with NSK integration override
+kubernetes-mcp-server \
+  --nsk-rancher-url https://rancher-dev.netskope.io \
+  --nsk-profile dev \
+  --nsk-config-dir ~/.nsk-dev \
+  --kubeconfig-dir ~/.nsk-dev \
+  --nsk-auto-refresh \
+  --port 8081
+
+# Staging with environment variables
+export RANCHER_URL="https://rancher.prime.iad0.netskope.com"
+export RANCHER_TOKEN="token-xxx"
+export NSK_PROFILE="staging"
+export NSK_CONFDIR="/tmp/staging-clusters"
+
+kubernetes-mcp-server \
+  --kubeconfig-dir /tmp/staging-clusters \
+  --nsk-auto-refresh \
+  --port 8082
 ```
 
 ## Expected Tool Usage Patterns
@@ -266,6 +382,11 @@ kubernetes-mcp-server --config multi-cluster.toml --port 8080
 
 // Execute across all clusters
 {"method": "tools/call", "params": {"name": "clusters_exec_all", "arguments": {"operation": "pods_list", "parameters": {"labelSelector": "app=nginx"}}}}
+
+// NSK integration operations
+{"method": "tools/call", "params": {"name": "nsk_refresh", "arguments": {"force": true}}}
+{"method": "tools/call", "params": {"name": "nsk_status"}}
+{"method": "tools/call", "params": {"name": "nsk_clusters_discover", "arguments": {"pattern": "^c1-.*"}}}
 ```
 
 ## Benefits
@@ -276,8 +397,10 @@ kubernetes-mcp-server --config multi-cluster.toml --port 8080
 - **Bulk Operations**: Execute maintenance tasks across entire fleet
 
 ### For Rancher Users
+- **Environment Isolation**: Each MCP server instance paired with specific Rancher environment
 - **Seamless Integration**: Works with existing NSK workflow and kubeconfig management
-- **Dynamic Discovery**: Automatically picks up new clusters as they're added
+- **Dynamic Discovery**: Automatically picks up new clusters as they're added via NSK
+- **Token Management**: Handles Rancher token rotation through NSK profiles
 - **Familiar Patterns**: Leverages existing KUBECONFIG environment variable approach
 
 ### For Developers
@@ -305,10 +428,36 @@ kubernetes-mcp-server --config multi-cluster.toml --port 8080
 ## Success Metrics
 
 1. **Functionality**: All existing single-cluster operations work unchanged
-2. **Discovery**: Automatic detection of clusters in specified directory
-3. **Switching**: Ability to change active cluster context via MCP tools
-4. **Cross-Cluster**: Successful execution of operations across multiple clusters
-5. **Integration**: Seamless operation with NSK-generated kubeconfig files
-6. **Performance**: No significant degradation in single-cluster operation performance
+2. **NSK Integration**: Successful pairing with specific Rancher environments via NSK
+3. **Discovery**: Automatic detection of clusters from NSK kubeconfig directory
+4. **Switching**: Ability to change active cluster context via MCP tools
+5. **Cross-Cluster**: Successful execution of operations across multiple clusters
+6. **Environment Isolation**: No cross-environment operations between MCP instances
+7. **Auto-Refresh**: Clusters automatically discovered when added to Rancher
+8. **Token Rotation**: Seamless handling of Rancher token updates via NSK profiles
+9. **Performance**: No significant degradation in single-cluster operation performance
+
+## Deployment Architecture
+
+### Multi-Environment Deployment Strategy
+
+```
+┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐
+│   Production MCP    │    │    Staging MCP      │    │  Development MCP    │
+│                     │    │                     │    │                     │
+│ rancher.netskope.io │    │ rancher.prime.iad0  │    │ rancher-dev...      │
+│ Profile: prod       │    │ Profile: staging    │    │ Profile: dev        │
+│ Clusters: c1-*      │    │ Clusters: iad0-*    │    │ Clusters: dev-*     │
+│ Port: 8080          │    │ Port: 8081          │    │ Port: 8082          │
+└─────────────────────┘    └─────────────────────┘    └─────────────────────┘
+          │                           │                           │
+          ▼                           ▼                           ▼
+┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐
+│ Production Clusters │    │  Staging Clusters   │    │ Development Clusters│
+│ - c1-sv5           │    │ - iad0-sandbox      │    │ - dev-cluster       │
+│ - c1-dfw1          │    │ - iad0-test         │    │ - local-dev         │
+│ - c1-lax1          │    │ - staging-east      │    │ - feature-test      │
+└─────────────────────┘    └─────────────────────┘    └─────────────────────┘
+```
 
 This proposal provides a comprehensive roadmap for implementing multi-cluster support while maintaining the existing architecture's strengths and ensuring seamless integration with your Rancher-based environment.
