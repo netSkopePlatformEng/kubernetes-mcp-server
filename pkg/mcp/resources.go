@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/containers/kubernetes-mcp-server/pkg/kubernetes"
@@ -134,7 +136,8 @@ func (s *Server) resourcesList(ctx context.Context, ctr mcp.CallToolRequest) (*m
 	}
 	ret, err := derived.ResourcesList(ctx, gvk, ns, resourceListOptions)
 	if err != nil {
-		return NewTextResult("", fmt.Errorf("failed to list resources: %v", err)), nil
+		errorMsg := s.formatKubernetesError(err)
+		return NewTextResult("", fmt.Errorf("failed to list resources: %s", errorMsg)), nil
 	}
 	return NewTextResult(s.configuration.ListOutput.PrintObj(ret)), nil
 }
@@ -169,7 +172,8 @@ func (s *Server) resourcesGet(ctx context.Context, ctr mcp.CallToolRequest) (*mc
 	}
 	ret, err := derived.ResourcesGet(ctx, gvk, ns, n)
 	if err != nil {
-		return NewTextResult("", fmt.Errorf("failed to get resource: %v", err)), nil
+		errorMsg := s.formatKubernetesError(err)
+		return NewTextResult("", fmt.Errorf("failed to get resource: %s", errorMsg)), nil
 	}
 	return NewTextResult(output.MarshalYaml(ret)), nil
 }
@@ -191,7 +195,9 @@ func (s *Server) resourcesCreateOrUpdate(ctx context.Context, ctr mcp.CallToolRe
 	}
 	resources, err := derived.ResourcesCreateOrUpdate(ctx, r)
 	if err != nil {
-		return NewTextResult("", fmt.Errorf("failed to create or update resources: %v", err)), nil
+		// Enhanced error handling for better user experience
+		errorMsg := s.formatKubernetesError(err)
+		return NewTextResult("", fmt.Errorf("failed to create or update resources: %s", errorMsg)), nil
 	}
 	marshalledYaml, err := output.MarshalYaml(resources)
 	if err != nil {
@@ -230,7 +236,8 @@ func (s *Server) resourcesDelete(ctx context.Context, ctr mcp.CallToolRequest) (
 	}
 	err = derived.ResourcesDelete(ctx, gvk, ns, n)
 	if err != nil {
-		return NewTextResult("", fmt.Errorf("failed to delete resource: %v", err)), nil
+		errorMsg := s.formatKubernetesError(err)
+		return NewTextResult("", fmt.Errorf("failed to delete resource: %s", errorMsg)), nil
 	}
 	return NewTextResult("Resource deleted successfully", err), nil
 }
@@ -255,4 +262,67 @@ func parseGroupVersionKind(arguments map[string]interface{}) (*schema.GroupVersi
 		return nil, errors.New("invalid argument apiVersion")
 	}
 	return &schema.GroupVersionKind{Group: gv.Group, Version: gv.Version, Kind: kind.(string)}, nil
+}
+
+// formatKubernetesError formats Kubernetes API errors into more user-friendly messages
+func (s *Server) formatKubernetesError(err error) string {
+	if err == nil {
+		return "unknown error"
+	}
+
+	// Check if it's a Kubernetes API error
+	if k8serrors.IsConflict(err) {
+		// Handle field manager conflicts and other conflicts
+		errorMsg := err.Error()
+		if strings.Contains(errorMsg, "field is owned by") {
+			return fmt.Sprintf("Field management conflict: %s\n\nThis usually happens when a resource field was previously managed by a different tool (like kubectl). To resolve this:\n1. Use 'kubectl apply --force-conflicts --server-side' for server-side apply, or\n2. Use 'kubectl replace' instead of apply, or\n3. Remove the conflicting field from your YAML and apply again", errorMsg)
+		}
+		return fmt.Sprintf("Resource conflict: %s", errorMsg)
+	}
+
+	if k8serrors.IsAlreadyExists(err) {
+		return fmt.Sprintf("Resource already exists: %s\n\nTip: Use 'kubectl apply' instead of 'kubectl create', or delete the existing resource first.", err.Error())
+	}
+
+	if k8serrors.IsNotFound(err) {
+		return fmt.Sprintf("Resource not found: %s\n\nTip: Check if the namespace exists and the resource name is correct.", err.Error())
+	}
+
+	if k8serrors.IsForbidden(err) {
+		return fmt.Sprintf("Access forbidden: %s\n\nTip: Check your RBAC permissions or authentication credentials.", err.Error())
+	}
+
+	if k8serrors.IsUnauthorized(err) {
+		return fmt.Sprintf("Authentication failed: %s\n\nTip: Check your kubeconfig credentials or token.", err.Error())
+	}
+
+	if k8serrors.IsInvalid(err) {
+		errorMsg := err.Error()
+		return fmt.Sprintf("Invalid resource specification: %s\n\nTip: Check your YAML syntax and field values.", errorMsg)
+	}
+
+	if k8serrors.IsTimeout(err) {
+		return fmt.Sprintf("Operation timed out: %s\n\nTip: The cluster may be slow to respond. Try again or check cluster health.", err.Error())
+	}
+
+	if k8serrors.IsServerTimeout(err) {
+		return fmt.Sprintf("Server timeout: %s\n\nTip: The Kubernetes API server is taking too long to respond. Check cluster status.", err.Error())
+	}
+
+	if k8serrors.IsServiceUnavailable(err) {
+		return fmt.Sprintf("Service unavailable: %s\n\nTip: The Kubernetes API server may be overloaded or temporarily unavailable.", err.Error())
+	}
+
+	// For any other error, provide the original message with context
+	errorMsg := err.Error()
+	if strings.Contains(errorMsg, "connection refused") {
+		return fmt.Sprintf("Connection failed: %s\n\nTip: Check if the cluster is running and accessible.", errorMsg)
+	}
+
+	if strings.Contains(errorMsg, "no such host") {
+		return fmt.Sprintf("Network error: %s\n\nTip: Check your kubeconfig server URL and network connectivity.", errorMsg)
+	}
+
+	// Return the original error for any unhandled cases
+	return errorMsg
 }
