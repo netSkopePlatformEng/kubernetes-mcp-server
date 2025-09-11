@@ -51,6 +51,7 @@ type Server struct {
 	server        *server.MCPServer
 	enabledTools  []string
 	k             *internalk8s.Manager
+	k8s           *internalk8s.Kubernetes // Add persistent Kubernetes instance for multi-cluster
 }
 
 func NewServer(configuration Configuration) (*Server, error) {
@@ -85,14 +86,17 @@ func NewServer(configuration Configuration) (*Server, error) {
 func (s *Server) reloadKubernetesClient() error {
 	// Check if multi-cluster mode is enabled and use appropriate initialization
 	if s.configuration.StaticConfig.IsMultiClusterEnabled() {
-		// Use the new multi-cluster aware NewKubernetes function
-		logger := klog.Background()
-		k8s, err := internalk8s.NewKubernetes(s.configuration.StaticConfig, logger)
-		if err != nil {
-			return err
+		// Create or reuse the multi-cluster Kubernetes instance
+		if s.k8s == nil {
+			logger := klog.Background()
+			k8s, err := internalk8s.NewKubernetes(s.configuration.StaticConfig, logger)
+			if err != nil {
+				return err
+			}
+			s.k8s = k8s
 		}
-		// Get the Manager from the Kubernetes instance
-		manager, err := k8s.GetManager()
+		// Get the Manager from the Kubernetes instance (which reflects current active cluster)
+		manager, err := s.k8s.GetManager()
 		if err != nil {
 			return err
 		}
@@ -161,7 +165,9 @@ func (s *Server) GetEnabledTools() []string {
 }
 
 func (s *Server) Close() {
-	if s.k != nil {
+	if s.k8s != nil {
+		s.k8s.Close()
+	} else if s.k != nil {
 		s.k.Close()
 	}
 }

@@ -7,7 +7,6 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"k8s.io/klog/v2"
 
 	"github.com/containers/kubernetes-mcp-server/pkg/kubernetes"
 )
@@ -80,19 +79,20 @@ func (s *Server) isMultiClusterEnabled() bool {
 	return s.configuration.StaticConfig.IsMultiClusterEnabled()
 }
 
-// getKubernetesWithMultiCluster returns a Kubernetes instance with multi-cluster support
+// getKubernetesWithMultiCluster returns the server's persistent Kubernetes instance with multi-cluster support
 func (s *Server) getKubernetesWithMultiCluster() (*kubernetes.Kubernetes, error) {
-	// This is a placeholder - in the actual implementation, we would need to
-	// create a Kubernetes instance that supports multi-cluster operations
-	// For now, we'll check if the configuration supports multi-cluster mode
 	if !s.isMultiClusterEnabled() {
 		return nil, fmt.Errorf("multi-cluster mode not enabled")
 	}
 
-	// Create a logger for the Kubernetes instance
-	logger := klog.Background()
+	// Ensure the Kubernetes instance is initialized
+	if s.k8s == nil {
+		if err := s.reloadKubernetesClient(); err != nil {
+			return nil, fmt.Errorf("failed to initialize Kubernetes client: %w", err)
+		}
+	}
 
-	return kubernetes.NewKubernetes(s.configuration.StaticConfig, logger)
+	return s.k8s, nil
 }
 
 // clustersList handles the clusters_list tool
@@ -104,7 +104,6 @@ func (s *Server) clustersList(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to get Kubernetes client: %w", err)), nil
 	}
-	defer k8s.StopMultiCluster()
 
 	clusters := k8s.ListClusters()
 	activeCluster := k8s.GetActiveCluster()
@@ -152,7 +151,6 @@ func (s *Server) clustersSwitch(ctx context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to get Kubernetes client: %w", err)), nil
 	}
-	defer k8s.StopMultiCluster()
 
 	// Get current cluster for comparison
 	previousCluster := k8s.GetActiveCluster()
@@ -162,7 +160,13 @@ func (s *Server) clustersSwitch(ctx context.Context, req mcp.CallToolRequest) (*
 		return NewTextResult("", fmt.Errorf("failed to switch to cluster %s: %w", clusterName, err)), nil
 	}
 
-	// Reload the Kubernetes client to use the new cluster
+	// Verify the switch worked
+	newActiveCluster := k8s.GetActiveCluster()
+	if newActiveCluster != clusterName {
+		return NewTextResult("", fmt.Errorf("cluster switch failed: expected %s but active cluster is %s", clusterName, newActiveCluster)), nil
+	}
+
+	// Refresh the Manager instance to reflect the new active cluster
 	if err := s.reloadKubernetesClient(); err != nil {
 		return NewTextResult("", fmt.Errorf("failed to reload Kubernetes client: %w", err)), nil
 	}
@@ -180,7 +184,6 @@ func (s *Server) clustersStatus(ctx context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to get Kubernetes client: %w", err)), nil
 	}
-	defer k8s.StopMultiCluster()
 
 	clusters := k8s.ListClusters()
 	var output strings.Builder
@@ -242,7 +245,6 @@ func (s *Server) clustersExecAll(ctx context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to get Kubernetes client: %w", err)), nil
 	}
-	defer k8s.StopMultiCluster()
 
 	// Get target clusters
 	var targetClusters []string
@@ -324,7 +326,6 @@ func (s *Server) clustersRefresh(ctx context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to get Kubernetes client: %w", err)), nil
 	}
-	defer k8s.StopMultiCluster()
 
 	// Note: This would need to be implemented in the multi-cluster manager
 	// For now, we'll return a placeholder message

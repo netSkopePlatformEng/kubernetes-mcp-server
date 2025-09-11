@@ -16,10 +16,6 @@ Based on analysis of the NSK codebase, the following environment variables contr
 - `NSK_CONFDIR` - Directory for NSK configuration and kubeconfig files (default: "$HOME/.nsk")
 
 ### Extended Environment Variables
-- `POLARIS_API_URL` - Polaris API endpoint
-- `POLARIS_SSL_SKIP_VERIFY` - Skip SSL verification for Polaris
-- `NETBOX_URL` - NetBox API endpoint
-- `NETBOX_TOKEN` - NetBox API token
 - `GITHUB_TOKEN` - GitHub personal access token
 
 ## Enhanced MCP Server Configuration
@@ -208,6 +204,33 @@ func (nsk *NSKIntegration) RefreshKubeConfigs(ctx context.Context) error {
     return nsk.clusterManager.DiscoverClusters()
 }
 
+func (nsk *NSKIntegration) GetClusterKubeConfig(ctx context.Context, clusterName string, save bool) (string, error) {
+    nsk.logger.Info("Getting kubeconfig for cluster", "cluster", clusterName)
+    
+    cmd := exec.CommandContext(ctx, nsk.getNSKPath(), "cluster", "kubeconfig", "--name", clusterName)
+    if !save {
+        // Output to stdout instead of saving to file
+        cmd.Args = append(cmd.Args, "--stdout")
+    }
+    
+    output, err := cmd.CombinedOutput()
+    if err != nil {
+        return "", fmt.Errorf("NSK get kubeconfig failed for cluster %s: %w, output: %s", clusterName, err, output)
+    }
+    
+    if save {
+        nsk.logger.Info("NSK kubeconfig saved for cluster", "cluster", clusterName, "output", string(output))
+        // Trigger cluster manager to rescan directory to pick up new file
+        if err := nsk.clusterManager.DiscoverClusters(); err != nil {
+            nsk.logger.Error(err, "Failed to rediscover clusters after kubeconfig save")
+        }
+        return string(output), nil
+    }
+    
+    nsk.logger.Info("NSK kubeconfig retrieved for cluster", "cluster", clusterName)
+    return string(output), nil
+}
+
 func (nsk *NSKIntegration) refreshLoop(ctx context.Context) {
     for {
         select {
@@ -267,6 +290,14 @@ func (s *Server) initNSKTools() []server.ServerTool {
             mcp.WithTitleAnnotation("NSK: Discover Clusters"),
             mcp.WithReadOnlyHintAnnotation(false),
         ), Handler: s.nskClustersDiscover},
+        
+        {Tool: mcp.NewTool("nsk_get",
+            mcp.WithDescription("Get kubeconfig for a specific cluster from Rancher via NSK"),
+            mcp.WithString("cluster_name", mcp.Description("Name of the cluster to get kubeconfig for"), mcp.Required()),
+            mcp.WithBoolean("save", mcp.Description("Save kubeconfig to file in config directory")),
+            mcp.WithTitleAnnotation("NSK: Get Cluster Kubeconfig"),
+            mcp.WithReadOnlyHintAnnotation(false),
+        ), Handler: s.nskGet},
     }
 }
 ```
