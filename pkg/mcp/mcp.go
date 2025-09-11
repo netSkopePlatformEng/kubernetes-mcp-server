@@ -83,11 +83,28 @@ func NewServer(configuration Configuration) (*Server, error) {
 }
 
 func (s *Server) reloadKubernetesClient() error {
-	k, err := internalk8s.NewManager(s.configuration.StaticConfig)
-	if err != nil {
-		return err
+	// Check if multi-cluster mode is enabled and use appropriate initialization
+	if s.configuration.StaticConfig.IsMultiClusterEnabled() {
+		// Use the new multi-cluster aware NewKubernetes function
+		logger := klog.Background()
+		k8s, err := internalk8s.NewKubernetes(s.configuration.StaticConfig, logger)
+		if err != nil {
+			return err
+		}
+		// Get the Manager from the Kubernetes instance
+		manager, err := k8s.GetManager()
+		if err != nil {
+			return err
+		}
+		s.k = manager
+	} else {
+		// Use legacy single-cluster manager
+		k, err := internalk8s.NewManager(s.configuration.StaticConfig)
+		if err != nil {
+			return err
+		}
+		s.k = k
 	}
-	s.k = k
 	applicableTools := make([]server.ServerTool, 0)
 	for _, tool := range s.configuration.Profile.GetTools(s) {
 		if !s.configuration.isToolApplicable(tool) {
