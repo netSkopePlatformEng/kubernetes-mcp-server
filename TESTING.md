@@ -72,9 +72,9 @@ claude mcp list
 
 ## Testing NSK Integration
 
-Ensure you have NSK kubeconfig files in `~/.nsk/`:
+Ensure you have NSK kubeconfig files in `~/.mcp/`:
 ```bash
-ls ~/.nsk/*.yaml
+ls ~/.mcp/*.yaml
 ```
 
 Example cluster files:
