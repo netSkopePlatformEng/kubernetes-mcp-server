@@ -8,7 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"k8s.io/klog/v2"
-	
+
 	"github.com/containers/kubernetes-mcp-server/pkg/kubernetes"
 )
 
@@ -88,10 +88,10 @@ func (s *Server) getKubernetesWithMultiCluster() (*kubernetes.Kubernetes, error)
 	if !s.isMultiClusterEnabled() {
 		return nil, fmt.Errorf("multi-cluster mode not enabled")
 	}
-	
+
 	// Create a logger for the Kubernetes instance
 	logger := klog.Background()
-	
+
 	return kubernetes.NewKubernetes(s.configuration.StaticConfig, logger)
 }
 
@@ -205,7 +205,7 @@ func (s *Server) clustersStatus(ctx context.Context, req mcp.CallToolRequest) (*
 		// Try to validate cluster connectivity
 		// Note: This would need to be implemented in the Kubernetes package
 		output.WriteString("Connectivity: Available\n") // Placeholder
-		
+
 		if cluster.Environment != "" {
 			output.WriteString(fmt.Sprintf("Environment: %s\n", cluster.Environment))
 		}

@@ -73,14 +73,14 @@ func DefaultClusterHealthConfig() ClusterHealthConfig {
 
 // ClusterHealthStatus contains the health status of a cluster
 type ClusterHealthStatus struct {
-	Cluster       string                `json:"cluster"`
-	State         ClusterHealthState    `json:"state"`
-	CircuitState  CircuitBreakerState   `json:"circuit_state"`
-	FailureCount  int                   `json:"failure_count"`
-	LastCheck     time.Time             `json:"last_check"`
-	LastFailure   time.Time             `json:"last_failure,omitempty"`
-	LastSuccess   time.Time             `json:"last_success,omitempty"`
-	ErrorMessage  string                `json:"error_message,omitempty"`
+	Cluster      string              `json:"cluster"`
+	State        ClusterHealthState  `json:"state"`
+	CircuitState CircuitBreakerState `json:"circuit_state"`
+	FailureCount int                 `json:"failure_count"`
+	LastCheck    time.Time           `json:"last_check"`
+	LastFailure  time.Time           `json:"last_failure,omitempty"`
+	LastSuccess  time.Time           `json:"last_success,omitempty"`
+	ErrorMessage string              `json:"error_message,omitempty"`
 }
 
 // ClusterHealthMonitor monitors cluster health with circuit breaker pattern
@@ -107,7 +107,7 @@ func NewClusterHealthMonitor(config ClusterHealthConfig, logger klog.Logger, hea
 // Start starts the health monitoring
 func (chm *ClusterHealthMonitor) Start(ctx context.Context, clusters []string) {
 	chm.logger.Info("Starting cluster health monitor", "clusters", len(clusters))
-	
+
 	// Initialize status for each cluster
 	chm.mutex.Lock()
 	for _, cluster := range clusters {
@@ -199,18 +199,18 @@ func (chm *ClusterHealthMonitor) checkClusterHealth(ctx context.Context, cluster
 		status.FailureCount++
 		status.LastFailure = time.Now()
 		status.ErrorMessage = err.Error()
-		
-		chm.logger.V(3).Info("Cluster health check failed", 
-			"cluster", cluster, 
-			"failures", status.FailureCount, 
+
+		chm.logger.V(3).Info("Cluster health check failed",
+			"cluster", cluster,
+			"failures", status.FailureCount,
 			"error", err.Error())
 
 		// Update state based on failure count
 		if status.FailureCount >= chm.config.MaxFailures {
 			status.State = ClusterHealthUnhealthy
 			status.CircuitState = CircuitBreakerOpen
-			chm.logger.Info("Circuit breaker opened for cluster", 
-				"cluster", cluster, 
+			chm.logger.Info("Circuit breaker opened for cluster",
+				"cluster", cluster,
 				"failures", status.FailureCount)
 		} else {
 			status.State = ClusterHealthDegraded
@@ -225,7 +225,7 @@ func (chm *ClusterHealthMonitor) checkClusterHealth(ctx context.Context, cluster
 		// Health check succeeded
 		status.LastSuccess = time.Now()
 		status.ErrorMessage = ""
-		
+
 		if status.CircuitState == CircuitBreakerHalfOpen || status.FailureCount > 0 {
 			chm.logger.Info("Cluster health restored", "cluster", cluster)
 		}

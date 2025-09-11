@@ -39,7 +39,7 @@ const (
 type CloseWatchKubeConfig func() error
 
 type Kubernetes struct {
-	manager            *Manager
+	manager             *Manager
 	multiClusterManager *MultiClusterManager
 }
 
@@ -53,11 +53,11 @@ type Manager struct {
 
 	staticConfig         *config.StaticConfig
 	CloseWatchKubeConfig CloseWatchKubeConfig
-	
+
 	// Resource cleanup
-	ctx           context.Context
-	cancel        context.CancelFunc
-	cleanupFuncs  []func() error
+	ctx          context.Context
+	cancel       context.CancelFunc
+	cleanupFuncs []func() error
 }
 
 var Scheme = scheme.Scheme
@@ -108,7 +108,7 @@ func NewKubernetes(config *config.StaticConfig, logger klog.Logger) (*Kubernetes
 		if err != nil {
 			return nil, fmt.Errorf("failed to create multi-cluster manager: %w", err)
 		}
-		
+
 		// Start the multi-cluster manager to discover clusters
 		ctx := context.Background()
 		if err := k8s.multiClusterManager.Start(ctx); err != nil {
@@ -239,7 +239,7 @@ func (m *Manager) Close() {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	
+
 	// Run all cleanup functions
 	for _, cleanup := range m.cleanupFuncs {
 		if err := cleanup(); err != nil {
@@ -247,12 +247,12 @@ func (m *Manager) Close() {
 			klog.Errorf("Error during cleanup: %v", err)
 		}
 	}
-	
+
 	// Close kubeconfig watcher
 	if m.CloseWatchKubeConfig != nil {
 		_ = m.CloseWatchKubeConfig()
 	}
-	
+
 	// Clear discovery cache to free memory
 	if m.discoveryClient != nil {
 		m.discoveryClient.Invalidate()

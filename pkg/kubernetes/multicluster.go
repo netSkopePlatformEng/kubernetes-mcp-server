@@ -17,13 +17,13 @@ import (
 
 // MultiClusterManager extends the existing Manager to support multiple clusters
 type MultiClusterManager struct {
-	staticConfig   *config.StaticConfig
-	clusters       map[string]*Manager
-	activeCluster  string
-	nskManager     *nsk.Manager
-	healthMonitor  *ClusterHealthMonitor
-	logger         klog.Logger
-	mutex          sync.RWMutex
+	staticConfig  *config.StaticConfig
+	clusters      map[string]*Manager
+	activeCluster string
+	nskManager    *nsk.Manager
+	healthMonitor *ClusterHealthMonitor
+	logger        klog.Logger
+	mutex         sync.RWMutex
 }
 
 // ClusterConfig represents the configuration for a single cluster
@@ -179,7 +179,7 @@ func (mcm *MultiClusterManager) DiscoverClusters(ctx context.Context) error {
 				oldManager.Close()
 			}
 		}
-		
+
 		// Add new clusters to monitoring
 		for newCluster := range newClusters {
 			if _, exists := oldClusters[newCluster]; !exists {
@@ -426,14 +426,14 @@ func (mcm *MultiClusterManager) performHealthCheck(ctx context.Context, cluster 
 		return fmt.Errorf("failed to get manager for cluster %s: %w", cluster, err)
 	}
 
-	// Try to create a Kubernetes client and perform a simple API call
-	client, err := manager.CreateClient()
+	// Try to get the discovery client and perform a simple API call
+	client, err := manager.ToDiscoveryClient()
 	if err != nil {
-		return fmt.Errorf("failed to create client for cluster %s: %w", cluster, err)
+		return fmt.Errorf("failed to get discovery client for cluster %s: %w", cluster, err)
 	}
 
 	// Perform a simple API call to check cluster health
-	_, err = client.Discovery().ServerVersion()
+	_, err = client.ServerVersion()
 	if err != nil {
 		return fmt.Errorf("cluster %s health check failed: %w", cluster, err)
 	}
