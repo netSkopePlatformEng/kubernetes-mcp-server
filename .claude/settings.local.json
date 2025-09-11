@@ -1,15 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git remote set-url origin git@github.com:netSkopePlatformEng/kubernetes-mcp-server.git)",
-      "Bash(git push origin main)",
-      "Bash(gh repo view netSkopePlatformEng/kubernetes-mcp-server)",
-      "Bash(git remote set-url origin git@github.com:jdambly-ns/kubernetes-mcp-server.git)",
-      "Bash(tsh version)",
-      "Bash(tsh status)",
-      "Bash(git add TELEPORT_INTEGRATION_PROPOSAL.md)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nAdd comprehensive Teleport integration proposal for enterprise security\n\n- Add TELEPORT_INTEGRATION_PROPOSAL.md with complete Teleport authentication system\n- Design multi-environment support for Commercial, FedRAMP, and PBMM compliance zones\n- Implement TeleportAuthManager for profile and session management across environments\n- Include new MCP tools for Teleport operations (profiles, authentication, Kubernetes access)\n- Add automatic credential renewal and session management capabilities\n- Support role-based access control leveraging existing Teleport role structure\n- Include Docker integration with Teleport client (tsh) and Netskope artifactory standards\n- Add environment-specific configurations for compliance requirements (FedRAMP, PBMM)\n- Enable secure, audited Kubernetes access through Teleport for AI agent interactions\n- Support session persistence, automatic renewal, and multi-cluster discovery via Teleport\n- Include comprehensive security model with authentication flows and audit capabilities\n\nFeatures:\n- Multi-environment Teleport support (Commercial/FedRAMP/PBMM)\n- Automatic Teleport profile discovery and management  \n- Enhanced Kubernetes tools with Teleport authentication awareness\n- Session management with configurable renewal thresholds\n- Role-based access control integration\n- Compliance-ready audit trails and session logging\n- Docker deployment with Teleport client integration\n- Environment isolation and secure cluster switching\n\n🤖 Generated with [Claude Code](https://claude.ai/code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(make test)",
+      "Bash(go build ./...)",
+      "Bash(go test ./pkg/nsk ./pkg/kubernetes ./pkg/mcp -v)"
     ],
+    "deny": [],
+    "ask": [],
     "additionalDirectories": [
       "/Users/jdambly/repos/nsk"
     ]
