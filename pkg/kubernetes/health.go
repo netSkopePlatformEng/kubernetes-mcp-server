@@ -128,7 +128,13 @@ func (chm *ClusterHealthMonitor) Start(ctx context.Context, clusters []string) {
 // Stop stops the health monitoring
 func (chm *ClusterHealthMonitor) Stop() {
 	chm.logger.Info("Stopping cluster health monitor")
-	close(chm.stopCh)
+	select {
+	case <-chm.stopCh:
+		// Already stopped
+		return
+	default:
+		close(chm.stopCh)
+	}
 }
 
 // monitorLoop runs the health monitoring loop
