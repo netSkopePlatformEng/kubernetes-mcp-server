@@ -327,16 +327,27 @@ func (s *Server) clustersRefresh(ctx context.Context, req mcp.CallToolRequest) (
 		return NewTextResult("", fmt.Errorf("failed to get Kubernetes client: %w", err)), nil
 	}
 
-	// Note: This would need to be implemented in the multi-cluster manager
-	// For now, we'll return a placeholder message
-	result := "Cluster refresh completed"
-	if force {
-		result = "Forced cluster refresh completed"
+	// Perform actual refresh
+	if err := k8s.RefreshClusters(ctx); err != nil {
+		return NewTextResult("", fmt.Errorf("cluster refresh failed: %w", err)), nil
 	}
 
-	// Get updated cluster count
+	// Get updated cluster count and status
 	clusters := k8s.ListClusters()
-	result += fmt.Sprintf(" - %d clusters available", len(clusters))
+	result := fmt.Sprintf("Cluster refresh completed - %d clusters available", len(clusters))
+	if force {
+		result = fmt.Sprintf("Forced cluster refresh completed - %d clusters available", len(clusters))
+	}
+
+	// Add cluster details for debugging
+	result += "\n\nDiscovered clusters:"
+	for _, cluster := range clusters {
+		status := "inactive"
+		if cluster.IsActive {
+			status = "active"
+		}
+		result += fmt.Sprintf("\n• %s (%s) - %s", cluster.Name, status, cluster.KubeConfig)
+	}
 
 	return NewTextResult(result, nil), nil
 }

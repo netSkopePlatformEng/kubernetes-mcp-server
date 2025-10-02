@@ -155,13 +155,21 @@ func (mcm *MultiClusterManager) DiscoverClusters(ctx context.Context) error {
 
 	// Initialize Manager instances for each cluster
 	newClusters := make(map[string]*Manager)
+	var failedClusters []string
 	for name, kubeconfigPath := range discoveredClusters {
+		mcm.logger.V(2).Info("Creating manager for cluster", "cluster", name, "kubeconfig", kubeconfigPath)
 		manager, err := mcm.createClusterManager(name, kubeconfigPath)
 		if err != nil {
 			mcm.logger.Error(err, "Failed to create manager for cluster", "cluster", name, "kubeconfig", kubeconfigPath)
+			failedClusters = append(failedClusters, name)
 			continue
 		}
 		newClusters[name] = manager
+		mcm.logger.V(2).Info("Successfully created manager for cluster", "cluster", name)
+	}
+
+	if len(failedClusters) > 0 {
+		mcm.logger.Info("Some clusters failed to initialize", "failed_clusters", failedClusters, "successful_clusters", len(newClusters), "total_discovered", len(discoveredClusters))
 	}
 
 	mcm.mutex.Lock()
@@ -205,17 +213,24 @@ func (mcm *MultiClusterManager) scanKubeConfigDirectory() (map[string]string, er
 	clusters := make(map[string]string)
 
 	if mcm.staticConfig.KubeConfigDir == "" {
+		mcm.logger.V(2).Info("No kubeconfig directory specified")
 		return clusters, nil
 	}
 
+	mcm.logger.V(2).Info("Scanning kubeconfig directory", "directory", mcm.staticConfig.KubeConfigDir)
+
 	err := filepath.Walk(mcm.staticConfig.KubeConfigDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			mcm.logger.Error(err, "Error walking directory", "path", path)
 			return err
 		}
 
 		if info.IsDir() {
+			mcm.logger.V(3).Info("Skipping directory", "path", path)
 			return nil
 		}
+
+		mcm.logger.V(3).Info("Found file", "path", path, "name", info.Name())
 
 		// Check if file is a YAML kubeconfig file
 		if strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml") {
@@ -223,10 +238,18 @@ func (mcm *MultiClusterManager) scanKubeConfigDirectory() (map[string]string, er
 			basename := filepath.Base(path)
 			clusterName := strings.TrimSuffix(basename, filepath.Ext(basename))
 			clusters[clusterName] = path
+			mcm.logger.V(2).Info("Discovered cluster config", "cluster", clusterName, "path", path)
+		} else {
+			mcm.logger.V(3).Info("Skipping non-YAML file", "path", path)
 		}
 
 		return nil
 	})
+
+	mcm.logger.V(2).Info("Directory scan completed", "clusters_found", len(clusters))
+	for name, path := range clusters {
+		mcm.logger.V(2).Info("Cluster discovered", "name", name, "path", path)
+	}
 
 	return clusters, err
 }
@@ -256,16 +279,34 @@ func (mcm *MultiClusterManager) applyClusterAliases(clusters map[string]string) 
 
 // createClusterManager creates a Manager instance for a specific cluster
 func (mcm *MultiClusterManager) createClusterManager(clusterName, kubeconfigPath string) (*Manager, error) {
+	mcm.logger.V(2).Info("Creating manager for cluster", "cluster", clusterName, "kubeconfig", kubeconfigPath)
+
 	// Create a copy of the static config with the specific kubeconfig
 	clusterConfig := *mcm.staticConfig
 	clusterConfig.KubeConfig = kubeconfigPath
 	clusterConfig.KubeConfigDir = "" // Clear multi-cluster config to use single kubeconfig
 
+	// Force fresh client creation by clearing any cached configurations
+	// This ensures we don't inherit stale authentication state
+
+	mcm.logger.V(3).Info("Creating manager with config", "cluster", clusterName,
+		"kubeconfig", clusterConfig.KubeConfig)
+
 	// Create manager for this cluster
 	manager, err := NewManager(&clusterConfig)
 	if err != nil {
+		mcm.logger.Error(err, "Failed to create manager", "cluster", clusterName, "kubeconfig", kubeconfigPath)
 		return nil, fmt.Errorf("failed to create manager for cluster %s: %w", clusterName, err)
 	}
+
+	// Validate the manager has proper configuration
+	restConfig, err := manager.ToRESTConfig()
+	if err != nil || restConfig == nil {
+		return nil, fmt.Errorf("cluster %s manager has invalid rest config: %w", clusterName, err)
+	}
+
+	mcm.logger.V(2).Info("Successfully created manager for cluster", "cluster", clusterName,
+		"server", restConfig.Host)
 
 	return manager, nil
 }
@@ -278,22 +319,48 @@ func (mcm *MultiClusterManager) SwitchCluster(clusterName string) error {
 	// Check if cluster exists
 	manager, exists := mcm.clusters[clusterName]
 	if !exists {
-		return fmt.Errorf("cluster %s not found", clusterName)
+		availableClusters := make([]string, 0, len(mcm.clusters))
+		for name := range mcm.clusters {
+			availableClusters = append(availableClusters, name)
+		}
+		return fmt.Errorf("cluster %s not found, available clusters: %v", clusterName, availableClusters)
 	}
 
-	// Set KUBECONFIG environment variable
-	kubeconfigPath := mcm.staticConfig.KubeConfig
-	if manager != nil {
-		// Get kubeconfig path from the manager's static config
-		kubeconfigPath = manager.staticConfig.KubeConfig
+	// Validate the manager is properly configured
+	if manager == nil {
+		return fmt.Errorf("cluster %s has no manager instance", clusterName)
+	}
+	if manager.staticConfig == nil {
+		return fmt.Errorf("cluster %s manager has no configuration", clusterName)
+	}
+	if manager.staticConfig.KubeConfig == "" {
+		return fmt.Errorf("cluster %s manager has no kubeconfig path", clusterName)
 	}
 
-	if kubeconfigPath != "" {
-		os.Setenv("KUBECONFIG", kubeconfigPath)
-	}
+	// Store previous cluster for logging
+	previousCluster := mcm.activeCluster
 
+	mcm.logger.V(2).Info("Attempting cluster switch",
+		"from", previousCluster,
+		"to", clusterName,
+		"kubeconfig", manager.staticConfig.KubeConfig,
+		"server", func() string {
+			if restConfig, err := manager.ToRESTConfig(); err == nil && restConfig != nil {
+				return restConfig.Host
+			}
+			return "unknown"
+		}())
+
+	// Switch to the new cluster - each manager is pre-configured with its own kubeconfig
 	mcm.activeCluster = clusterName
-	mcm.logger.V(2).Info("Switched to cluster", "cluster", clusterName, "kubeconfig", kubeconfigPath)
+
+	// Note: We skip synchronous health check here to avoid blocking the response.
+	// The background health monitor will check cluster health asynchronously.
+
+	mcm.logger.Info("Switched cluster",
+		"from", previousCluster,
+		"to", clusterName,
+		"kubeconfig", manager.staticConfig.KubeConfig)
 
 	return nil
 }
@@ -421,22 +488,42 @@ func (mcm *MultiClusterManager) GetNSKStatus() *nsk.ManagerStatus {
 
 // performHealthCheck performs a health check on a specific cluster
 func (mcm *MultiClusterManager) performHealthCheck(ctx context.Context, cluster string) error {
+	mcm.logger.V(3).Info("Performing health check", "cluster", cluster)
+
 	manager, err := mcm.GetManager(cluster)
 	if err != nil {
+		mcm.logger.V(3).Info("Failed to get manager for health check", "cluster", cluster, "error", err)
 		return fmt.Errorf("failed to get manager for cluster %s: %w", cluster, err)
+	}
+
+	// Validate manager configuration
+	restConfig, err := manager.ToRESTConfig()
+	if err != nil || restConfig == nil {
+		mcm.logger.V(3).Info("Manager has no rest config", "cluster", cluster, "error", err)
+		return fmt.Errorf("cluster %s manager has no rest config: %w", cluster, err)
 	}
 
 	// Try to get the discovery client and perform a simple API call
 	client, err := manager.ToDiscoveryClient()
 	if err != nil {
+		mcm.logger.V(3).Info("Failed to get discovery client", "cluster", cluster, "error", err)
 		return fmt.Errorf("failed to get discovery client for cluster %s: %w", cluster, err)
 	}
 
-	// Perform a simple API call to check cluster health
-	_, err = client.ServerVersion()
+	// Perform a simple API call to check cluster health and authentication
+	serverVersion, err := client.ServerVersion()
 	if err != nil {
+		mcm.logger.V(3).Info("Health check failed", "cluster", cluster, "error", err, "server", restConfig.Host)
+
+		// Provide more detailed error messages for common authentication issues
+		if strings.Contains(err.Error(), "credentials") || strings.Contains(err.Error(), "Unauthorized") {
+			return fmt.Errorf("cluster %s authentication failed - server requested credentials: %w", cluster, err)
+		}
 		return fmt.Errorf("cluster %s health check failed: %w", cluster, err)
 	}
+
+	mcm.logger.V(3).Info("Health check successful", "cluster", cluster,
+		"server", restConfig.Host, "version", serverVersion.String())
 
 	return nil
 }
