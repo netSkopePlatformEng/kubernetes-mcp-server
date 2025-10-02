@@ -210,7 +210,18 @@ func (m *MCPServerOptions) loadFlags(cmd *cobra.Command) {
 func (m *MCPServerOptions) initializeLogging() {
 	flagSet := flag.NewFlagSet("klog", flag.ContinueOnError)
 	klog.InitFlags(flagSet)
-	loggerOptions := []textlogger.ConfigOption{textlogger.Output(m.Out)}
+
+	// Use stderr for logging in STDIO mode to avoid interfering with JSON-RPC on stdout
+	logOutput := m.ErrOut
+	if logOutput == nil {
+		logOutput = m.Out // Fallback to Out if ErrOut is not available
+	}
+	// In STDIO mode (no port specified), always use stderr for logs
+	if m.StaticConfig.Port == "" {
+		logOutput = m.ErrOut
+	}
+
+	loggerOptions := []textlogger.ConfigOption{textlogger.Output(logOutput)}
 	if m.StaticConfig.LogLevel >= 0 {
 		loggerOptions = append(loggerOptions, textlogger.Verbosity(m.StaticConfig.LogLevel))
 		_ = flagSet.Parse([]string{"--v", strconv.Itoa(m.StaticConfig.LogLevel)})

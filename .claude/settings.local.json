@@ -1,9 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(make test)",
-      "Bash(go build ./...)",
-      "Bash(go test ./pkg/nsk ./pkg/kubernetes ./pkg/mcp -v)"
+      "mcp__kubernetes-mcp-server__configuration_view",
+      "mcp__kubernetes-mcp-server__namespaces_list",
+      "mcp__kubernetes-mcp-server__clusters_list",
+      "mcp__kubernetes-mcp-server__clusters_switch",
+      "mcp__kubernetes-mcp-server__pods_list_in_namespace",
+      "mcp__kubernetes-mcp-server__pods_get",
+      "mcp__kubernetes-mcp-server__clusters_exec_all",
+      "mcp__kubernetes-mcp-server__pods_list",
+      "mcp__kubernetes-mcp-server__resources_get"
     ],
     "deny": [],
     "ask": [],

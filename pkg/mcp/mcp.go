@@ -51,6 +51,7 @@ type Server struct {
 	server        *server.MCPServer
 	enabledTools  []string
 	k             *internalk8s.Manager
+	k8s           *internalk8s.Kubernetes // Add persistent Kubernetes instance for multi-cluster
 }
 
 func NewServer(configuration Configuration) (*Server, error) {
@@ -83,24 +84,45 @@ func NewServer(configuration Configuration) (*Server, error) {
 }
 
 func (s *Server) reloadKubernetesClient() error {
+	logger := klog.Background()
+
 	// Check if multi-cluster mode is enabled and use appropriate initialization
 	if s.configuration.StaticConfig.IsMultiClusterEnabled() {
-		// Use the new multi-cluster aware NewKubernetes function
-		logger := klog.Background()
-		k8s, err := internalk8s.NewKubernetes(s.configuration.StaticConfig, logger)
+		// Create or reuse the multi-cluster Kubernetes instance
+		if s.k8s == nil {
+			logger.V(2).Info("Creating new multi-cluster Kubernetes instance")
+			k8s, err := internalk8s.NewKubernetes(s.configuration.StaticConfig, logger)
+			if err != nil {
+				logger.Error(err, "Failed to create multi-cluster Kubernetes instance")
+				return err
+			}
+			s.k8s = k8s
+		}
+
+		// Get the Manager from the Kubernetes instance (which reflects current active cluster)
+		activeCluster := s.k8s.GetActiveCluster()
+		logger.V(2).Info("Getting manager for active cluster", "cluster", activeCluster)
+
+		manager, err := s.k8s.GetManager()
 		if err != nil {
+			logger.Error(err, "Failed to get manager for active cluster", "cluster", activeCluster)
 			return err
 		}
-		// Get the Manager from the Kubernetes instance
-		manager, err := k8s.GetManager()
-		if err != nil {
-			return err
+
+		// Validate the manager has proper configuration
+		restConfig, err := manager.ToRESTConfig()
+		if err != nil || restConfig == nil {
+			return fmt.Errorf("manager for cluster %s has no valid rest config: %w", activeCluster, err)
 		}
+
+		logger.V(2).Info("Successfully reloaded manager", "cluster", activeCluster, "server", restConfig.Host)
 		s.k = manager
 	} else {
 		// Use legacy single-cluster manager
+		logger.V(2).Info("Creating single-cluster manager")
 		k, err := internalk8s.NewManager(s.configuration.StaticConfig)
 		if err != nil {
+			logger.Error(err, "Failed to create single-cluster manager")
 			return err
 		}
 		s.k = k
@@ -114,6 +136,30 @@ func (s *Server) reloadKubernetesClient() error {
 		s.enabledTools = append(s.enabledTools, tool.Tool.Name)
 	}
 	s.server.SetTools(applicableTools...)
+	return nil
+}
+
+// validateManagerAuthentication performs a basic authentication check for the manager
+func (s *Server) validateManagerAuthentication(manager *internalk8s.Manager, clusterName string) error {
+	logger := klog.Background()
+
+	// Try to get a discovery client and perform a simple API call
+	discoveryClient, err := manager.ToDiscoveryClient()
+	if err != nil {
+		logger.V(3).Info("Failed to get discovery client", "cluster", clusterName, "error", err)
+		return fmt.Errorf("failed to get discovery client: %w", err)
+	}
+
+	// Perform a basic server version check to validate authentication
+	serverVersion, err := discoveryClient.ServerVersion()
+	if err != nil {
+		logger.V(3).Info("Server version check failed", "cluster", clusterName, "error", err)
+		return fmt.Errorf("server version check failed: %w", err)
+	}
+
+	logger.V(3).Info("Authentication validation successful", "cluster", clusterName,
+		"server_version", serverVersion.String())
+
 	return nil
 }
 
@@ -161,7 +207,9 @@ func (s *Server) GetEnabledTools() []string {
 }
 
 func (s *Server) Close() {
-	if s.k != nil {
+	if s.k8s != nil {
+		s.k8s.Close()
+	} else if s.k != nil {
 		s.k.Close()
 	}
 }

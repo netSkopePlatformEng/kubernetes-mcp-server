@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a fork of the Kubernetes MCP Server project, extended to support Rancher-based multi-cluster environments. The goal is to enable AI agents to interact with multiple Kubernetes clusters by reading kubeconfig files from a directory and using the KUBECONFIG environment variable to switch between clusters.
+This is a fork of the Kubernetes MCP Server project, extended to support Rancher-based multi-cluster environments. The goal is to enable AI agents to interact with multiple Kubernetes clusters by reading kubeconfig files from a directory and managing isolated client connections for each cluster.
 
 ### Key Technologies
 - **Go 1.24.1** - Main programming language
@@ -21,7 +21,7 @@ This is a fork of the Kubernetes MCP Server project, extended to support Rancher
 The NSK (Netskope Kubernetes) tool in `/Users/jdambly/repos/nsk` is used to download kubeconfig files for multiple clusters from Rancher. Key concepts:
 - Rancher API provides individual kubeconfig files per cluster
 - Files are typically stored in `~/.nsk/` directory with names like `c1-am2.yaml`, `c1-sv5.yaml`
-- The KUBECONFIG environment variable points to the active cluster config
+- Each cluster gets its own isolated client connection using its specific kubeconfig
 - NSK commands: `nsk cluster list`, `nsk cluster kubeconfig --name=cluster-name`
 
 ## Development Commands
@@ -116,7 +116,7 @@ The planned extension should:
 
 2. **Cluster Context Management**
    - Add tools to list available clusters
-   - Implement cluster switching via KUBECONFIG environment variable updates
+   - Implement cluster switching via isolated client managers per cluster
    - Enable cross-cluster operations (run same command on all clusters)
 
 3. **Enhanced MCP Tools**
@@ -149,8 +149,8 @@ Key files to modify for multi-cluster support:
 - `--port` - HTTP/SSE server mode
 
 ### Environment Variables
-- `KUBECONFIG` - Active cluster configuration (Rancher pattern)
-- Standard Kubernetes environment variables supported
+- Standard Kubernetes environment variables supported for cluster authentication
+- Each cluster uses its own isolated kubeconfig file (no global KUBECONFIG dependency)
 
 ## Testing Strategy
 
