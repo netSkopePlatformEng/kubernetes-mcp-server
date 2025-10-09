@@ -47,10 +47,10 @@ users:
 	}
 
 	tests := []struct {
-		name           string
-		staticConfig   *config.StaticConfig
-		expectNSK      bool
-		expectMulti    bool
+		name         string
+		staticConfig *config.StaticConfig
+		expectNSK    bool
+		expectMulti  bool
 	}{
 		{
 			name: "Multi-cluster with NSK enabled",
@@ -234,9 +234,9 @@ users:
 	}
 
 	tests := []struct {
-		name          string
-		staticConfig  *config.StaticConfig
-		multiCluster  bool
+		name         string
+		staticConfig *config.StaticConfig
+		multiCluster bool
 	}{
 		{
 			name: "Multi-cluster mode",

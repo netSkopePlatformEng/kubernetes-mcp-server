@@ -148,6 +148,16 @@ func (nsk *NSKIntegration) RefreshKubeConfigs(ctx context.Context) error {
 	// Build NSK command
 	args := []string{"cluster", "kubeconfig"}
 
+	// Always specify the config directory explicitly
+	if nsk.config.ConfigDir != "" {
+		args = append(args, "--confdir", nsk.config.ConfigDir)
+	}
+
+	// Add profile if specified
+	if nsk.config.Profile != "" {
+		args = append(args, "--profile", nsk.config.Profile)
+	}
+
 	// Add cluster pattern if specified
 	if nsk.config.ClusterPattern != "" {
 		args = append(args, "--name-pattern", nsk.config.ClusterPattern)
@@ -204,6 +214,17 @@ func (nsk *NSKIntegration) GetClusterKubeConfig(ctx context.Context, clusterName
 	nsk.logger.Info("Getting kubeconfig for cluster", "cluster", clusterName, "save", save)
 
 	args := []string{"cluster", "kubeconfig", "--name", clusterName}
+
+	// Always specify the config directory explicitly
+	if nsk.config.ConfigDir != "" {
+		args = append(args, "--confdir", nsk.config.ConfigDir)
+	}
+
+	// Add profile if specified
+	if nsk.config.Profile != "" {
+		args = append(args, "--profile", nsk.config.Profile)
+	}
+
 	if !save {
 		// Output to stdout instead of saving to file
 		args = append(args, "--stdout")
@@ -377,6 +398,17 @@ func (nsk *NSKIntegration) ValidateNSKBinary() error {
 // DiscoverClusters discovers new clusters from Rancher
 func (nsk *NSKIntegration) DiscoverClusters(ctx context.Context, pattern string) ([]string, error) {
 	args := []string{"cluster", "list"}
+
+	// Always specify the config directory explicitly
+	if nsk.config.ConfigDir != "" {
+		args = append(args, "--confdir", nsk.config.ConfigDir)
+	}
+
+	// Add profile if specified
+	if nsk.config.Profile != "" {
+		args = append(args, "--profile", nsk.config.Profile)
+	}
+
 	if pattern != "" {
 		args = append(args, "--name-pattern", pattern)
 	}

@@ -1033,7 +1033,7 @@ func TestServer_clustersRefreshWithNSK(t *testing.T) {
 
 	// Create a mock NSK integration
 	mockNSK := &kubernetes.NSKIntegration{}
-	
+
 	staticConfig := &config.StaticConfig{
 		KubeConfigDir: kubeconfigDir,
 		NSKIntegration: &config.NSKConfig{
