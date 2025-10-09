@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containers/kubernetes-mcp-server/internal/test"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/internal/test"
 )
 
 func TestWatchKubeConfig(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/containers/kubernetes-mcp-server/internal/test"
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/internal/test"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

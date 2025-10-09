@@ -14,8 +14,8 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/strings/slices"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
-	"github.com/containers/kubernetes-mcp-server/pkg/mcp"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/mcp"
 )
 
 type KubernetesApiTokenVerifier interface {

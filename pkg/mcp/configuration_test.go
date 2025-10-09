@@ -3,8 +3,8 @@ package mcp
 import (
 	"testing"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/kubernetes"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/kubernetes"
 	"k8s.io/client-go/rest"
 	v1 "k8s.io/client-go/tools/clientcmd/api/v1"
 	"sigs.k8s.io/yaml"

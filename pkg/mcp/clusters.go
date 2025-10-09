@@ -11,7 +11,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/kubernetes"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/kubernetes"
 )
 
 // ClusterStatus represents the status of a cluster

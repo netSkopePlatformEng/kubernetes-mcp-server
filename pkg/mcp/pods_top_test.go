@@ -5,10 +5,10 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/containers/kubernetes-mcp-server/internal/test"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/internal/test"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
 )
 
 func TestPodsTopMetricsUnavailable(t *testing.T) {

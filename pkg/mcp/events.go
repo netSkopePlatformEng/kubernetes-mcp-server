@@ -7,7 +7,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/output"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/output"
 )
 
 func (s *Server) initEvents() []server.ServerTool {

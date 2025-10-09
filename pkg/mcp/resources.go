@@ -11,8 +11,8 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/kubernetes"
-	"github.com/containers/kubernetes-mcp-server/pkg/output"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/kubernetes"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/output"
 )
 
 func (s *Server) initResources() []server.ServerTool {

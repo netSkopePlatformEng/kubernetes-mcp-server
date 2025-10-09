@@ -13,10 +13,10 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
-	internalk8s "github.com/containers/kubernetes-mcp-server/pkg/kubernetes"
-	"github.com/containers/kubernetes-mcp-server/pkg/output"
-	"github.com/containers/kubernetes-mcp-server/pkg/version"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
+	internalk8s "github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/kubernetes"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/output"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/version"
 )
 
 type ContextKey string

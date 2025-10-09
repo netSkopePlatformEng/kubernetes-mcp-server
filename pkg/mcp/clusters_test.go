@@ -11,9 +11,9 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"k8s.io/klog/v2"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
-	"github.com/containers/kubernetes-mcp-server/pkg/kubernetes"
-	"github.com/containers/kubernetes-mcp-server/pkg/output"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/kubernetes"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/output"
 )
 
 func TestServer_initClusters(t *testing.T) {

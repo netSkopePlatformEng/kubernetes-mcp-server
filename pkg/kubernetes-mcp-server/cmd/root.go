@@ -22,11 +22,11 @@ import (
 	"k8s.io/kubectl/pkg/util/i18n"
 	"k8s.io/kubectl/pkg/util/templates"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
-	internalhttp "github.com/containers/kubernetes-mcp-server/pkg/http"
-	"github.com/containers/kubernetes-mcp-server/pkg/mcp"
-	"github.com/containers/kubernetes-mcp-server/pkg/output"
-	"github.com/containers/kubernetes-mcp-server/pkg/version"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
+	internalhttp "github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/http"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/mcp"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/output"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/version"
 )
 
 var (
