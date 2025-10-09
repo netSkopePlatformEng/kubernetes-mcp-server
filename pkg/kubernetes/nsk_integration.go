@@ -60,14 +60,13 @@ func (nsk *NSKIntegration) Start(ctx context.Context) error {
 		}
 	}
 
-	// Initial refresh
-	if err := nsk.RefreshKubeConfigs(ctx); err != nil {
-		nsk.logger.Error(err, "Initial kubeconfig refresh failed")
-		// Don't fail startup if initial refresh fails
-	}
-
 	// Start auto-refresh if enabled
 	if nsk.config.AutoRefresh {
+		// Initial refresh only if auto-refresh is enabled
+		if err := nsk.RefreshKubeConfigs(ctx); err != nil {
+			nsk.logger.Error(err, "Initial kubeconfig refresh failed")
+			// Don't fail startup if initial refresh fails
+		}
 		interval, err := time.ParseDuration(nsk.config.RefreshInterval)
 		if err != nil {
 			interval = time.Hour // default to 1 hour
@@ -145,8 +144,8 @@ func (nsk *NSKIntegration) RefreshKubeConfigs(ctx context.Context) error {
 		Success:   false,
 	}
 
-	// Build NSK command
-	args := []string{"cluster", "kubeconfig"}
+	// Build NSK command - need --all to download all clusters
+	args := []string{"cluster", "kubeconfig", "--all"}
 
 	// Always specify the config directory explicitly
 	if nsk.config.ConfigDir != "" {
