@@ -47,11 +47,13 @@ func (c *Configuration) isToolApplicable(tool server.ServerTool) bool {
 }
 
 type Server struct {
-	configuration *Configuration
-	server        *server.MCPServer
-	enabledTools  []string
-	k             *internalk8s.Manager
-	k8s           *internalk8s.Kubernetes // Add persistent Kubernetes instance for multi-cluster
+	configuration  *Configuration
+	server         *server.MCPServer
+	enabledTools   []string
+	k              *internalk8s.Manager
+	k8s            *internalk8s.Kubernetes          // Add persistent Kubernetes instance for multi-cluster
+	clusterManager *internalk8s.MultiClusterManager // Multi-cluster manager
+	nsk            *internalk8s.NSKIntegration      // NSK integration for Rancher kubeconfig management
 }
 
 func NewServer(configuration Configuration) (*Server, error) {
@@ -75,12 +77,57 @@ func NewServer(configuration Configuration) (*Server, error) {
 			serverOptions...,
 		),
 	}
+
+	// Initialize multi-cluster support if enabled
+	if configuration.StaticConfig.IsMultiClusterEnabled() {
+		if err := s.initializeMultiCluster(); err != nil {
+			return nil, fmt.Errorf("failed to initialize multi-cluster support: %w", err)
+		}
+	}
+
 	if err := s.reloadKubernetesClient(); err != nil {
 		return nil, err
 	}
 	s.k.WatchKubeConfig(s.reloadKubernetesClient)
 
 	return s, nil
+}
+
+// initializeMultiCluster initializes multi-cluster support components
+func (s *Server) initializeMultiCluster() error {
+	logger := klog.Background()
+
+	// Initialize multi-cluster manager
+	mcm, err := internalk8s.NewMultiClusterManager(s.configuration.StaticConfig, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create multi-cluster manager: %w", err)
+	}
+	s.clusterManager = mcm
+
+	// Initialize NSK integration if configured
+	if s.configuration.StaticConfig.IsNSKEnabled() {
+		s.nsk = internalk8s.NewNSKIntegrationForMCM(s.configuration.StaticConfig.NSKIntegration, s.clusterManager)
+
+		// Start NSK integration
+		ctx := context.Background()
+		if err := s.nsk.Start(ctx); err != nil {
+			logger.Error(err, "Failed to start NSK integration")
+			// Don't fail if NSK fails to start - clusters can still be managed manually
+		}
+	}
+
+	// Start the multi-cluster manager
+	ctx := context.Background()
+	if err := s.clusterManager.Start(ctx); err != nil {
+		logger.Error(err, "Failed to start multi-cluster manager")
+		// Don't fail if no clusters found initially
+	}
+
+	logger.Info("Multi-cluster support initialized",
+		"clusters", len(s.clusterManager.ListClusters()),
+		"nsk_enabled", s.configuration.StaticConfig.IsNSKEnabled())
+
+	return nil
 }
 
 func (s *Server) reloadKubernetesClient() error {

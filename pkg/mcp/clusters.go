@@ -1,15 +1,34 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
+	"text/tabwriter"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/containers/kubernetes-mcp-server/pkg/kubernetes"
 )
+
+// ClusterStatus represents the status of a cluster
+type ClusterStatus struct {
+	Name           string
+	Status         string // Ready, NotReady, Unknown
+	Version        string
+	NodeCount      int
+	ReadyNodes     int
+	NamespaceCount int
+	PodCount       int
+	RunningPods    int
+	KubeconfigAge  time.Duration
+	LastError      string
+	IsActive       bool
+	APILatency     time.Duration
+}
 
 // initClusters initializes cluster management tools for multi-cluster support
 func (s *Server) initClusters() []server.ServerTool {
@@ -100,43 +119,63 @@ func (s *Server) clustersList(ctx context.Context, req mcp.CallToolRequest) (*mc
 	args := req.GetArguments()
 	showDetails, _ := args["show_details"].(bool)
 
-	k8s, err := s.getKubernetesWithMultiCluster()
-	if err != nil {
-		return NewTextResult("", fmt.Errorf("failed to get Kubernetes client: %w", err)), nil
+	if s.clusterManager == nil {
+		return NewTextResult("", fmt.Errorf("cluster manager not initialized")), nil
 	}
 
-	clusters := k8s.ListClusters()
-	activeCluster := k8s.GetActiveCluster()
+	clusters := s.clusterManager.ListClusters()
+	if len(clusters) == 0 {
+		return NewTextResult("No clusters found. Run 'clusters_refresh' to discover clusters.", nil), nil
+	}
 
-	var output strings.Builder
-	output.WriteString(fmt.Sprintf("Available clusters: %d\n", len(clusters)))
-	output.WriteString(fmt.Sprintf("Active cluster: %s\n\n", activeCluster))
+	var result strings.Builder
 
-	for _, cluster := range clusters {
-		status := "inactive"
-		if cluster.IsActive {
-			status = "active"
-		}
+	if showDetails {
+		// Detailed view
+		for i, cluster := range clusters {
+			if i > 0 {
+				result.WriteString("\n---\n\n")
+			}
 
-		if showDetails {
-			output.WriteString(fmt.Sprintf("• %s (%s)\n", cluster.Name, status))
-			output.WriteString(fmt.Sprintf("  KubeConfig: %s\n", cluster.KubeConfig))
+			activeMarker := ""
+			if cluster.IsActive {
+				activeMarker = " [ACTIVE]"
+			}
+
+			result.WriteString(fmt.Sprintf("Cluster: %s%s\n", cluster.Name, activeMarker))
+			result.WriteString(fmt.Sprintf("Kubeconfig: %s\n", cluster.KubeConfig))
+
 			if cluster.Environment != "" {
-				output.WriteString(fmt.Sprintf("  Environment: %s\n", cluster.Environment))
+				result.WriteString(fmt.Sprintf("Environment: %s\n", cluster.Environment))
 			}
 			if cluster.Description != "" {
-				output.WriteString(fmt.Sprintf("  Description: %s\n", cluster.Description))
+				result.WriteString(fmt.Sprintf("Description: %s\n", cluster.Description))
 			}
 			if !cluster.LastAccessed.IsZero() {
-				output.WriteString(fmt.Sprintf("  Last Accessed: %s\n", cluster.LastAccessed.Format("2006-01-02 15:04:05")))
+				result.WriteString(fmt.Sprintf("Last Accessed: %s\n", cluster.LastAccessed.Format(time.RFC3339)))
 			}
-			output.WriteString("\n")
-		} else {
-			output.WriteString(fmt.Sprintf("• %s (%s)\n", cluster.Name, status))
 		}
+	} else {
+		// Table view
+		w := tabwriter.NewWriter(&result, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "NAME\tACTIVE\tENVIRONMENT")
+
+		for _, cluster := range clusters {
+			active := ""
+			if cluster.IsActive {
+				active = "*"
+			}
+
+			fmt.Fprintf(w, "%s\t%s\t%s\n",
+				cluster.Name,
+				active,
+				cluster.Environment,
+			)
+		}
+		w.Flush()
 	}
 
-	return NewTextResult(output.String(), nil), nil
+	return NewTextResult(result.String(), nil), nil
 }
 
 // clustersSwitch handles the clusters_switch tool
@@ -147,21 +186,20 @@ func (s *Server) clustersSwitch(ctx context.Context, req mcp.CallToolRequest) (*
 		return NewTextResult("", fmt.Errorf("cluster name is required")), nil
 	}
 
-	k8s, err := s.getKubernetesWithMultiCluster()
-	if err != nil {
-		return NewTextResult("", fmt.Errorf("failed to get Kubernetes client: %w", err)), nil
+	if s.clusterManager == nil {
+		return NewTextResult("", fmt.Errorf("cluster manager not initialized")), nil
 	}
 
 	// Get current cluster for comparison
-	previousCluster := k8s.GetActiveCluster()
+	previousCluster := s.clusterManager.GetActiveCluster()
 
 	// Switch to the new cluster
-	if err := k8s.SwitchCluster(clusterName); err != nil {
+	if err := s.clusterManager.SwitchCluster(clusterName); err != nil {
 		return NewTextResult("", fmt.Errorf("failed to switch to cluster %s: %w", clusterName, err)), nil
 	}
 
 	// Verify the switch worked
-	newActiveCluster := k8s.GetActiveCluster()
+	newActiveCluster := s.clusterManager.GetActiveCluster()
 	if newActiveCluster != clusterName {
 		return NewTextResult("", fmt.Errorf("cluster switch failed: expected %s but active cluster is %s", clusterName, newActiveCluster)), nil
 	}
@@ -178,59 +216,169 @@ func (s *Server) clustersSwitch(ctx context.Context, req mcp.CallToolRequest) (*
 // clustersStatus handles the clusters_status tool
 func (s *Server) clustersStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := req.GetArguments()
-	targetCluster, _ := args["cluster"].(string)
+	clusterName, _ := args["cluster"].(string)
 
-	k8s, err := s.getKubernetesWithMultiCluster()
-	if err != nil {
-		return NewTextResult("", fmt.Errorf("failed to get Kubernetes client: %w", err)), nil
+	if s.clusterManager == nil {
+		return NewTextResult("", fmt.Errorf("cluster manager not initialized")), nil
 	}
 
-	clusters := k8s.ListClusters()
-	var output strings.Builder
+	var statuses []ClusterStatus
 
-	output.WriteString("Cluster Status Report\n")
-	output.WriteString("====================\n\n")
+	if clusterName != "" {
+		// Check specific cluster
+		status := s.checkClusterStatus(ctx, clusterName)
+		statuses = append(statuses, status)
 
+		// Detailed view for single cluster
+		return s.formatDetailedClusterStatus(status), nil
+	}
+
+	// Check all clusters
+	clusters := s.clusterManager.ListClusters()
 	for _, cluster := range clusters {
-		// Skip if specific cluster requested and this isn't it
-		if targetCluster != "" && cluster.Name != targetCluster {
-			continue
-		}
-
-		output.WriteString(fmt.Sprintf("Cluster: %s\n", cluster.Name))
-		output.WriteString(fmt.Sprintf("Status: %s\n", func() string {
-			if cluster.IsActive {
-				return "Active"
-			}
-			return "Available"
-		}()))
-
-		// Try to validate cluster connectivity
-		// Note: This would need to be implemented in the Kubernetes package
-		output.WriteString("Connectivity: Available\n") // Placeholder
-
-		if cluster.Environment != "" {
-			output.WriteString(fmt.Sprintf("Environment: %s\n", cluster.Environment))
-		}
-		output.WriteString(fmt.Sprintf("KubeConfig: %s\n", cluster.KubeConfig))
-		output.WriteString("\n")
+		status := s.checkClusterStatus(ctx, cluster.Name)
+		statuses = append(statuses, status)
 	}
 
-	if targetCluster != "" {
-		// Check if the specific cluster was found
-		found := false
-		for _, cluster := range clusters {
-			if cluster.Name == targetCluster {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return NewTextResult("", fmt.Errorf("cluster %s not found", targetCluster)), nil
+	// Format as table
+	return s.formatClusterStatusTable(statuses), nil
+}
+
+// checkClusterStatus checks the status of a single cluster
+func (s *Server) checkClusterStatus(ctx context.Context, clusterName string) ClusterStatus {
+	status := ClusterStatus{
+		Name:   clusterName,
+		Status: "Unknown",
+	}
+
+	// Get cluster manager for this cluster
+	manager, err := s.clusterManager.GetManager(clusterName)
+	if err != nil {
+		status.LastError = fmt.Sprintf("cluster not found: %v", err)
+		return status
+	}
+
+	// Check if this is the active cluster
+	clusters := s.clusterManager.ListClusters()
+	for _, c := range clusters {
+		if c.Name == clusterName && c.IsActive {
+			status.IsActive = true
+			break
 		}
 	}
 
-	return NewTextResult(output.String(), nil), nil
+	// Test API connectivity using discovery client
+	discoveryClient, err := manager.ToDiscoveryClient()
+	if err != nil {
+		status.Status = "NotReady"
+		status.LastError = fmt.Sprintf("Failed to get discovery client: %v", err)
+		return status
+	}
+
+	start := time.Now()
+	version, err := discoveryClient.ServerVersion()
+	status.APILatency = time.Since(start)
+
+	if err != nil {
+		status.Status = "NotReady"
+		status.LastError = err.Error()
+		return status
+	}
+
+	status.Status = "Ready"
+	status.Version = version.GitVersion
+
+	// For more detailed status, we would need to create a derived Kubernetes client
+	// But for now, we'll keep it simple with just the discovery check
+	// The detailed node/pod/namespace counts would require:
+	// derived, err := manager.Derived(checkCtx)
+	// and then using the derived client to query resources
+
+	return status
+}
+
+// formatClusterStatusTable formats cluster statuses as a table
+func (s *Server) formatClusterStatusTable(statuses []ClusterStatus) *mcp.CallToolResult {
+	var buf bytes.Buffer
+	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
+
+	// Header
+	fmt.Fprintln(w, "CLUSTER\tSTATUS\tVERSION\tNODES\tNAMESPACES\tPODS\tKUBECONFIG-AGE\tLATENCY\tERRORS")
+	fmt.Fprintln(w, "-------\t------\t-------\t-----\t----------\t----\t--------------\t-------\t------")
+
+	for _, s := range statuses {
+		cluster := s.Name
+		if s.IsActive {
+			cluster = cluster + " *"
+		}
+
+		nodes := "-"
+		if s.NodeCount > 0 {
+			nodes = fmt.Sprintf("%d/%d", s.ReadyNodes, s.NodeCount)
+		}
+
+		namespaces := "-"
+		if s.NamespaceCount > 0 {
+			namespaces = fmt.Sprintf("%d", s.NamespaceCount)
+		}
+
+		pods := "-"
+		if s.PodCount > 0 {
+			pods = fmt.Sprintf("%d/%d", s.RunningPods, s.PodCount)
+		}
+
+		age := humanizeDuration(s.KubeconfigAge)
+		latency := "-"
+		if s.APILatency > 0 {
+			latency = fmt.Sprintf("%dms", s.APILatency.Milliseconds())
+		}
+
+		errors := "-"
+		if s.LastError != "" {
+			// Truncate long error messages
+			if len(s.LastError) > 40 {
+				errors = s.LastError[:37] + "..."
+			} else {
+				errors = s.LastError
+			}
+		}
+
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			cluster, s.Status, s.Version, nodes, namespaces, pods, age, latency, errors)
+	}
+
+	w.Flush()
+	buf.WriteString("\n* = current active cluster\n")
+
+	return NewTextResult(buf.String(), nil)
+}
+
+// formatDetailedClusterStatus formats detailed status for a single cluster
+func (s *Server) formatDetailedClusterStatus(status ClusterStatus) *mcp.CallToolResult {
+	var result strings.Builder
+
+	result.WriteString(fmt.Sprintf("Cluster: %s\n", status.Name))
+	result.WriteString(fmt.Sprintf("Status: %s\n", status.Status))
+
+	if status.Status == "Ready" {
+		result.WriteString(fmt.Sprintf("Version: %s\n", status.Version))
+		result.WriteString(fmt.Sprintf("Nodes: %d (Ready: %d)\n", status.NodeCount, status.ReadyNodes))
+		result.WriteString(fmt.Sprintf("Namespaces: %d\n", status.NamespaceCount))
+		result.WriteString(fmt.Sprintf("Pods: %d (Running: %d)\n", status.PodCount, status.RunningPods))
+		result.WriteString(fmt.Sprintf("API Latency: %dms\n", status.APILatency.Milliseconds()))
+	}
+
+	if status.LastError != "" {
+		result.WriteString(fmt.Sprintf("Error: %s\n", status.LastError))
+	}
+
+	result.WriteString(fmt.Sprintf("Kubeconfig Age: %s\n", humanizeDuration(status.KubeconfigAge)))
+
+	if status.IsActive {
+		result.WriteString("Status: ACTIVE\n")
+	}
+
+	return NewTextResult(result.String(), nil)
 }
 
 // clustersExecAll handles the clusters_exec_all tool
@@ -322,32 +470,63 @@ func (s *Server) clustersRefresh(ctx context.Context, req mcp.CallToolRequest) (
 	args := req.GetArguments()
 	force, _ := args["force"].(bool)
 
-	k8s, err := s.getKubernetesWithMultiCluster()
-	if err != nil {
-		return NewTextResult("", fmt.Errorf("failed to get Kubernetes client: %w", err)), nil
+	if s.clusterManager == nil {
+		return NewTextResult("", fmt.Errorf("cluster manager not initialized")), nil
 	}
 
-	// Perform actual refresh
-	if err := k8s.RefreshClusters(ctx); err != nil {
-		return NewTextResult("", fmt.Errorf("cluster refresh failed: %w", err)), nil
-	}
+	var result strings.Builder
 
-	// Get updated cluster count and status
-	clusters := k8s.ListClusters()
-	result := fmt.Sprintf("Cluster refresh completed - %d clusters available", len(clusters))
-	if force {
-		result = fmt.Sprintf("Forced cluster refresh completed - %d clusters available", len(clusters))
-	}
-
-	// Add cluster details for debugging
-	result += "\n\nDiscovered clusters:"
-	for _, cluster := range clusters {
-		status := "inactive"
-		if cluster.IsActive {
-			status = "active"
+	// If NSK integration is enabled, use it for refresh
+	if s.nsk != nil {
+		if !force {
+			// Check if recently refreshed
+			lastRefresh := s.nsk.GetLastRefreshTime()
+			if time.Since(lastRefresh) < 5*time.Minute {
+				result.WriteString(fmt.Sprintf("Clusters were recently refreshed at %s\n", lastRefresh.Format(time.RFC3339)))
+				result.WriteString("Use 'force: true' to force refresh\n")
+				return NewTextResult(result.String(), nil), nil
+			}
 		}
-		result += fmt.Sprintf("\n• %s (%s) - %s", cluster.Name, status, cluster.KubeConfig)
+
+		// Refresh via NSK
+		if err := s.nsk.RefreshKubeConfigs(ctx); err != nil {
+			return NewTextResult("", fmt.Errorf("failed to refresh kubeconfigs via NSK: %w", err)), nil
+		}
+
+		result.WriteString("Successfully refreshed kubeconfigs from Rancher via NSK\n")
 	}
 
-	return NewTextResult(result, nil), nil
+	// Refresh clusters
+	if err := s.clusterManager.RefreshClusters(ctx); err != nil {
+		return NewTextResult("", fmt.Errorf("failed to refresh clusters: %w", err)), nil
+	}
+
+	clusters := s.clusterManager.ListClusters()
+	result.WriteString(fmt.Sprintf("Discovered %d clusters\n", len(clusters)))
+
+	// List discovered clusters
+	if len(clusters) > 0 {
+		result.WriteString("\nClusters:\n")
+		for _, cluster := range clusters {
+			// For now, just list the clusters without health status
+			// Health status would need to be checked via the health monitor
+			result.WriteString(fmt.Sprintf("  - %s\n", cluster.Name))
+		}
+	}
+
+	return NewTextResult(result.String(), nil), nil
+}
+
+// humanizeDuration converts a duration to a human-readable string
+func humanizeDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
