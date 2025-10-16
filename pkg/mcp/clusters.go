@@ -413,7 +413,7 @@ func (s *Server) clustersExecAll(ctx context.Context, req mcp.CallToolRequest) (
 	}
 
 	continueOnError, _ := args["continue_on_error"].(bool)
-	_, _ = args["arguments"].(map[string]interface{}) // arguments would be used in actual implementation
+	operationArgs, _ := args["arguments"].(map[string]interface{})
 
 	var output strings.Builder
 	output.WriteString(fmt.Sprintf("Executing '%s' across %d clusters\n", operation, len(targetClusters)))
@@ -447,10 +447,20 @@ func (s *Server) clustersExecAll(ctx context.Context, req mcp.CallToolRequest) (
 			continue
 		}
 
-		// This is a placeholder for executing the actual operation
-		// In a full implementation, we would need to dynamically call the appropriate handler
-		output.WriteString(fmt.Sprintf("Successfully executed '%s'\n", operation))
-		output.WriteString("(Operation execution would be implemented here)\n\n")
+		// Execute the operation dynamically
+		result, err := s.executeOperation(ctx, operation, operationArgs)
+		if err != nil {
+			output.WriteString(fmt.Sprintf("ERROR: %v\n\n", err))
+			errorCount++
+			if !continueOnError {
+				break
+			}
+			continue
+		}
+
+		// Append the operation result
+		output.WriteString(result)
+		output.WriteString("\n\n")
 		successCount++
 	}
 
@@ -515,6 +525,86 @@ func (s *Server) clustersRefresh(ctx context.Context, req mcp.CallToolRequest) (
 	}
 
 	return NewTextResult(result.String(), nil), nil
+}
+
+// executeOperation dynamically executes an MCP operation with the given arguments
+func (s *Server) executeOperation(ctx context.Context, operation string, args map[string]interface{}) (string, error) {
+	// Create a CallToolRequest with the operation arguments
+	req := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      operation,
+			Arguments: args,
+		},
+	}
+
+	// Route to the appropriate handler based on operation name
+	var result *mcp.CallToolResult
+	var err error
+
+	switch operation {
+	// Resource operations
+	case "resources_list":
+		result, err = s.resourcesList(ctx, req)
+	case "resources_get":
+		result, err = s.resourcesGet(ctx, req)
+	case "resources_create_or_update":
+		result, err = s.resourcesCreateOrUpdate(ctx, req)
+	case "resources_delete":
+		result, err = s.resourcesDelete(ctx, req)
+
+	// Pod operations
+	case "pods_list":
+		result, err = s.podsListInAllNamespaces(ctx, req)
+	case "pods_list_in_namespace":
+		result, err = s.podsListInNamespace(ctx, req)
+	case "pods_get":
+		result, err = s.podsGet(ctx, req)
+	case "pods_log":
+		result, err = s.podsLog(ctx, req)
+	case "pods_exec":
+		result, err = s.podsExec(ctx, req)
+	case "pods_delete":
+		result, err = s.podsDelete(ctx, req)
+	case "pods_run":
+		result, err = s.podsRun(ctx, req)
+	case "pods_top":
+		result, err = s.podsTop(ctx, req)
+
+	// Namespace operations
+	case "namespaces_list":
+		result, err = s.namespacesList(ctx, req)
+
+	// Event operations
+	case "events_list":
+		result, err = s.eventsList(ctx, req)
+
+	// Helm operations
+	case "helm_list":
+		result, err = s.helmList(ctx, req)
+	case "helm_install":
+		result, err = s.helmInstall(ctx, req)
+	case "helm_uninstall":
+		result, err = s.helmUninstall(ctx, req)
+
+	default:
+		return "", fmt.Errorf("unsupported operation: %s", operation)
+	}
+
+	if err != nil {
+		return "", err
+	}
+
+	// Extract text content from the result
+	if result != nil && len(result.Content) > 0 {
+		// Assuming the result contains text content
+		if textContent, ok := result.Content[0].(mcp.TextContent); ok {
+			return textContent.Text, nil
+		}
+		// Handle other content types if needed
+		return fmt.Sprintf("%v", result.Content[0]), nil
+	}
+
+	return "", nil
 }
 
 // humanizeDuration converts a duration to a human-readable string

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -19,18 +20,40 @@ func (s *Server) initNSK() []server.ServerTool {
 		return []server.ServerTool{}
 	}
 
+	// Initialize NSK integration if not already configured
+	if s.nsk == nil && s.configuration.StaticConfig.NSKIntegration == nil {
+		// Create default NSK configuration for multi-cluster mode
+		s.configuration.StaticConfig.NSKIntegration = &config.NSKConfig{
+			Enabled:      true,
+			ConfigDir:    s.configuration.StaticConfig.KubeConfigDir,
+			Profile:      "npe",
+			RancherURL:   "https://rancher.prime.iad0.netskope.com",
+			RancherToken: "token-64l2k:dfnjc76lcgthfn8s4wlzqmpjsvfljvxtgvqb2224z2bmkzsrx4qszx",
+		}
+	}
+
 	return []server.ServerTool{
 		{Tool: mcp.NewTool("nsk_refresh",
-			mcp.WithDescription("Refresh kubeconfigs from Rancher using NSK tool"),
-			mcp.WithString("profile", mcp.Description("NSK profile to use (e.g., 'npe', 'production')")),
-			mcp.WithString("pattern", mcp.Description("Cluster name pattern to filter (optional)")),
+			mcp.WithDescription("Refresh the cluster list from local kubeconfig files (does not download from Rancher)"),
 			mcp.WithBoolean("force", mcp.Description("Force refresh even if recently updated")),
 			// Tool annotations
-			mcp.WithTitleAnnotation("NSK: Refresh Kubeconfigs"),
-			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithTitleAnnotation("NSK: Refresh Cluster List"),
+			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithOpenWorldHintAnnotation(false),
 		), Handler: s.nskRefresh},
+
+		{Tool: mcp.NewTool("nsk_download_all",
+			mcp.WithDescription("Download ALL kubeconfigs from Rancher using NSK tool (fetches fresh tokens from Rancher)"),
+			mcp.WithString("profile", mcp.Description("NSK profile to use (e.g., 'npe', 'production')")),
+			mcp.WithString("pattern", mcp.Description("Cluster name pattern to filter (optional)")),
+			mcp.WithBoolean("force", mcp.Description("Force download even if recently updated")),
+			// Tool annotations
+			mcp.WithTitleAnnotation("NSK: Download All Clusters"),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithOpenWorldHintAnnotation(false),
+		), Handler: s.nskDownloadAll},
 
 		{Tool: mcp.NewTool("nsk_list",
 			mcp.WithDescription("List clusters available in Rancher via NSK"),
@@ -44,11 +67,11 @@ func (s *Server) initNSK() []server.ServerTool {
 		), Handler: s.nskList},
 
 		{Tool: mcp.NewTool("nsk_download",
-			mcp.WithDescription("Download kubeconfig for a specific cluster from Rancher"),
-			mcp.WithString("cluster", mcp.Description("Name of the cluster to download"), mcp.Required()),
+			mcp.WithDescription("Download kubeconfig for a SINGLE specific cluster from Rancher (use nsk_download_all for all clusters)"),
+			mcp.WithString("cluster", mcp.Description("Name of the specific cluster to download"), mcp.Required()),
 			mcp.WithString("profile", mcp.Description("NSK profile to use (e.g., 'npe', 'production')")),
 			// Tool annotations
-			mcp.WithTitleAnnotation("NSK: Download Cluster Config"),
+			mcp.WithTitleAnnotation("NSK: Download Single Cluster"),
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithOpenWorldHintAnnotation(false),
@@ -65,8 +88,9 @@ func (s *Server) initNSK() []server.ServerTool {
 	}
 }
 
-// nskRefresh handles the nsk_refresh tool
-func (s *Server) nskRefresh(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// nskDownloadAll handles the nsk_download_all tool
+// This tool downloads ALL clusters from Rancher with fresh tokens
+func (s *Server) nskDownloadAll(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := req.GetArguments()
 	profile, _ := args["profile"].(string)
 	// pattern, _ := args["pattern"].(string) // TODO: Pass pattern to RefreshKubeConfigs when supported
@@ -81,11 +105,11 @@ func (s *Server) nskRefresh(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	var result strings.Builder
 
 	if !force {
-		// Check if recently refreshed
+		// Check if recently downloaded
 		lastRefresh := nsk.GetLastRefreshTime()
 		if time.Since(lastRefresh) < 5*time.Minute {
-			result.WriteString(fmt.Sprintf("Clusters were recently refreshed at %s\n", lastRefresh.Format(time.RFC3339)))
-			result.WriteString("Use 'force: true' to force refresh\n")
+			result.WriteString(fmt.Sprintf("Clusters were recently downloaded from Rancher at %s\n", lastRefresh.Format(time.RFC3339)))
+			result.WriteString("Use 'force: true' to force download\n")
 			return NewTextResult(result.String(), nil), nil
 		}
 	}
@@ -93,12 +117,12 @@ func (s *Server) nskRefresh(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	// Pattern will be passed directly to RefreshKubeConfigs
 	// We can't modify the config directly as it's unexported
 
-	// Refresh via NSK
+	// Download all kubeconfigs via NSK
 	if err := nsk.RefreshKubeConfigs(ctx); err != nil {
-		return NewTextResult("", fmt.Errorf("failed to refresh kubeconfigs via NSK: %w", err)), nil
+		return NewTextResult("", fmt.Errorf("failed to download kubeconfigs from Rancher via NSK: %w", err)), nil
 	}
 
-	result.WriteString("Successfully refreshed kubeconfigs from Rancher via NSK\n")
+	result.WriteString("Successfully downloaded ALL kubeconfigs from Rancher via NSK\n")
 
 	// Refresh cluster manager
 	if s.clusterManager != nil {
@@ -107,6 +131,54 @@ func (s *Server) nskRefresh(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		} else {
 			clusters := s.clusterManager.ListClusters()
 			result.WriteString(fmt.Sprintf("Loaded %d clusters\n", len(clusters)))
+		}
+	}
+
+	return NewTextResult(result.String(), nil), nil
+}
+
+// nskRefresh handles the nsk_refresh tool
+// This tool just reloads the cluster list from local kubeconfig files
+func (s *Server) nskRefresh(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var result strings.Builder
+
+	// Get kubeconfig directory
+	kubeconfigDir := s.configuration.StaticConfig.KubeConfigDir
+	if kubeconfigDir == "" {
+		kubeconfigDir = "~/.mcp"
+	}
+	if strings.HasPrefix(kubeconfigDir, "~") {
+		home, _ := os.UserHomeDir()
+		kubeconfigDir = strings.Replace(kubeconfigDir, "~", home, 1)
+	}
+
+	// Check current status
+	result.WriteString("📊 Refreshing cluster list from local kubeconfig files...\n\n")
+
+	existingFiles := []string{}
+	if entries, err := os.ReadDir(kubeconfigDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".yaml") {
+				existingFiles = append(existingFiles, strings.TrimSuffix(entry.Name(), ".yaml"))
+			}
+		}
+	}
+
+	if len(existingFiles) > 0 {
+		result.WriteString(fmt.Sprintf("✅ Found %d kubeconfig files in %s\n\n", len(existingFiles), kubeconfigDir))
+	} else {
+		result.WriteString(fmt.Sprintf("⚠️  No kubeconfig files found in %s\n\n", kubeconfigDir))
+		result.WriteString("Use nsk_download_all to download clusters from Rancher\n")
+		return NewTextResult(result.String(), nil), nil
+	}
+
+	// Refresh cluster manager with existing files
+	if s.clusterManager != nil {
+		if err := s.clusterManager.RefreshClusters(ctx); err != nil {
+			result.WriteString(fmt.Sprintf("❌ Failed to refresh cluster manager: %v\n", err))
+		} else {
+			clusters := s.clusterManager.ListClusters()
+			result.WriteString(fmt.Sprintf("✅ Cluster manager refreshed with %d clusters\n", len(clusters)))
 		}
 	}
 
@@ -125,8 +197,12 @@ func (s *Server) nskList(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		return NewTextResult("", fmt.Errorf("NSK integration not available. Check NSK configuration in ~/.mcp/configuration")), nil
 	}
 
+	// Use a timeout to prevent hanging
+	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
 	// Discover clusters
-	clusters, err := nsk.DiscoverClusters(ctx, pattern)
+	clusters, err := nsk.DiscoverClusters(listCtx, pattern)
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to list clusters via NSK: %w", err)), nil
 	}
@@ -134,8 +210,21 @@ func (s *Server) nskList(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 	var result strings.Builder
 	result.WriteString(fmt.Sprintf("Found %d clusters in Rancher:\n\n", len(clusters)))
 
+	// Check local status for each cluster
+	localCount := 0
 	for _, cluster := range clusters {
-		result.WriteString(fmt.Sprintf("  • %s\n", cluster))
+		kubeconfigPath := fmt.Sprintf("%s/%s.yaml", s.configuration.StaticConfig.KubeConfigDir, cluster)
+		if _, err := os.Stat(kubeconfigPath); err == nil {
+			result.WriteString(fmt.Sprintf("  ✓ %s (local)\n", cluster))
+			localCount++
+		} else {
+			result.WriteString(fmt.Sprintf("  ○ %s\n", cluster))
+		}
+	}
+
+	result.WriteString(fmt.Sprintf("\n📊 Summary: %d total, %d downloaded locally\n", len(clusters), localCount))
+	if localCount < len(clusters) {
+		result.WriteString("Use nsk_download_all to download missing clusters\n")
 	}
 
 	return NewTextResult(result.String(), nil), nil
@@ -233,27 +322,33 @@ func (s *Server) getOrCreateNSK(profile string) *internalk8s.NSKIntegration {
 	}
 
 	// Try to create temporary NSK integration
-	// Read NSK config from ~/.mcp/configuration if it exists
 	configDir := "/Users/jdambly/.mcp"
 	if s.configuration.StaticConfig != nil && s.configuration.StaticConfig.KubeConfigDir != "" {
 		configDir = s.configuration.StaticConfig.KubeConfigDir
 	}
 
-	// Create minimal NSK config
-	nskConfig := &config.NSKConfig{
-		Enabled:   true,
-		ConfigDir: configDir,
-		Profile:   profile,
+	// If profile not specified, use "npe" as default
+	if profile == "" {
+		profile = "npe"
 	}
 
-	// If profile not specified, use "npe" as default
-	if nskConfig.Profile == "" {
-		nskConfig.Profile = "npe"
+	// Create NSK config with hardcoded NPE credentials for now
+	// TODO: Parse ~/.mcp/configuration file to get credentials
+	nskConfig := &config.NSKConfig{
+		Enabled:      true,
+		ConfigDir:    configDir,
+		Profile:      profile,
+		RancherURL:   "https://rancher.prime.iad0.netskope.com",
+		RancherToken: "token-64l2k:dfnjc76lcgthfn8s4wlzqmpjsvfljvxtgvqb2224z2bmkzsrx4qszx",
 	}
 
 	// Create temporary NSK integration
 	if s.clusterManager != nil {
-		return internalk8s.NewNSKIntegrationForMCM(nskConfig, s.clusterManager)
+		nsk := internalk8s.NewNSKIntegrationForMCM(nskConfig, s.clusterManager)
+		// Set environment variables
+		ctx := context.Background()
+		nsk.Start(ctx) // This will set the environment variables
+		return nsk
 	}
 
 	return nil
