@@ -18,11 +18,11 @@ This is a fork of the Kubernetes MCP Server project, extended to support Rancher
 - **Note**: Current go.mod uses k8s.io/* v0.34.0 dependencies, but should be downgraded to match v1.24.17 cluster compatibility
 
 ### Rancher Integration Context
-The NSK (Netskope Kubernetes) tool in `/Users/jdambly/repos/nsk` is used to download kubeconfig files for multiple clusters from Rancher. Key concepts:
+Rancher integration provides direct API access to download kubeconfig files for multiple clusters. Key concepts:
 - Rancher API provides individual kubeconfig files per cluster
-- Files are typically stored in `~/.nsk/` directory with names like `c1-am2.yaml`, `c1-sv5.yaml`
+- Files are stored in a configured directory with names like `c1-am2.yaml`, `c1-sv5.yaml`
 - Each cluster gets its own isolated client connection using its specific kubeconfig
-- NSK commands: `nsk cluster list`, `nsk cluster kubeconfig --name=cluster-name`
+- MCP tools: `rancher_list_clusters`, `rancher_download_cluster`, `rancher_download_all`
 
 ## Development Commands
 
@@ -110,7 +110,7 @@ npx @modelcontextprotocol/inspector@latest $(pwd)/kubernetes-mcp-server
 The planned extension should:
 
 1. **Directory-based Kubeconfig Loading**
-   - Read multiple kubeconfig files from a specified directory (e.g., `~/.nsk/`)
+   - Read multiple kubeconfig files from a specified directory
    - Maintain a mapping of cluster names to kubeconfig file paths
    - Add new MCP tools for cluster discovery and switching
 
@@ -133,11 +133,11 @@ Key files to modify for multi-cluster support:
 - `pkg/kubernetes-mcp-server/cmd/root.go` - Add kubeconfig directory flag
 - Configuration system to support directory-based cluster discovery
 
-### NSK Integration Notes
-- NSK generates individual kubeconfig files per cluster in `~/.nsk/`
+### Rancher Integration Notes
+- Rancher integration generates individual kubeconfig files per cluster
 - File naming pattern: `{cluster-name}.yaml` (e.g., `c1-am2.yaml`)
-- NSK profiles support multiple Rancher environments
-- Consider periodic refresh of kubeconfig files for token rotation
+- Supports multiple Rancher environments via configuration
+- Periodic refresh of kubeconfig files for token rotation
 
 ## Configuration Patterns
 

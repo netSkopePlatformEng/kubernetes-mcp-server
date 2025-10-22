@@ -69,6 +69,13 @@ type MCPServerOptions struct {
 	CertificateAuthority string
 	ServerURL            string
 
+	// Rancher integration
+	RancherEnabled   bool
+	RancherURL       string
+	RancherToken     string
+	RancherInsecure  bool
+	RancherConfigDir string
+
 	ConfigPath   string
 	StaticConfig *config.StaticConfig
 
@@ -117,6 +124,14 @@ func NewMCPServer(streams genericiooptions.IOStreams) *cobra.Command {
 	cmd.Flags().StringVar(&o.SSEBaseUrl, "sse-base-url", o.SSEBaseUrl, "SSE public base URL to use when sending the endpoint message (e.g. https://example.com)")
 	cmd.Flags().StringVar(&o.Kubeconfig, "kubeconfig", o.Kubeconfig, "Path to the kubeconfig file to use for authentication")
 	cmd.Flags().StringVar(&o.KubeconfigDir, "kubeconfig-dir", o.KubeconfigDir, "Directory containing multiple kubeconfig files for multi-cluster support")
+
+	// Rancher integration flags
+	cmd.Flags().BoolVar(&o.RancherEnabled, "rancher-enabled", false, "Enable Rancher integration for cluster management")
+	cmd.Flags().StringVar(&o.RancherURL, "rancher-url", "", "Rancher server URL (e.g., https://rancher.example.com)")
+	cmd.Flags().StringVar(&o.RancherToken, "rancher-token", "", "Rancher API token for authentication")
+	cmd.Flags().BoolVar(&o.RancherInsecure, "rancher-insecure", false, "Skip TLS verification for Rancher API (use with caution)")
+	cmd.Flags().StringVar(&o.RancherConfigDir, "rancher-config-dir", "", "Directory to store downloaded kubeconfig files (defaults to --kubeconfig-dir)")
+
 	cmd.Flags().StringVar(&o.Profile, "profile", o.Profile, "MCP profile to use (one of: "+strings.Join(mcp.ProfileNames, ", ")+")")
 	cmd.Flags().StringVar(&o.ListOutput, "list-output", o.ListOutput, "Output format for resource list operations (one of: "+strings.Join(output.Names, ", ")+"). Defaults to table.")
 	cmd.Flags().BoolVar(&o.ReadOnly, "read-only", o.ReadOnly, "If true, only tools annotated with readOnlyHint=true are exposed")
@@ -204,6 +219,46 @@ func (m *MCPServerOptions) loadFlags(cmd *cobra.Command) {
 	}
 	if cmd.Flag("certificate-authority").Changed {
 		m.StaticConfig.CertificateAuthority = m.CertificateAuthority
+	}
+
+	// Handle Rancher integration flags
+	if cmd.Flag("rancher-enabled").Changed || m.RancherEnabled {
+		// Initialize Rancher config if not already present
+		if m.StaticConfig.RancherIntegration == nil {
+			m.StaticConfig.RancherIntegration = &config.RancherConfig{}
+		}
+		m.StaticConfig.RancherIntegration.Enabled = m.RancherEnabled
+	}
+	if cmd.Flag("rancher-url").Changed && m.RancherURL != "" {
+		if m.StaticConfig.RancherIntegration == nil {
+			m.StaticConfig.RancherIntegration = &config.RancherConfig{}
+		}
+		m.StaticConfig.RancherIntegration.URL = m.RancherURL
+	}
+	if cmd.Flag("rancher-token").Changed && m.RancherToken != "" {
+		if m.StaticConfig.RancherIntegration == nil {
+			m.StaticConfig.RancherIntegration = &config.RancherConfig{}
+		}
+		m.StaticConfig.RancherIntegration.Token = m.RancherToken
+	}
+	if cmd.Flag("rancher-insecure").Changed {
+		if m.StaticConfig.RancherIntegration == nil {
+			m.StaticConfig.RancherIntegration = &config.RancherConfig{}
+		}
+		m.StaticConfig.RancherIntegration.Insecure = m.RancherInsecure
+	}
+	if cmd.Flag("rancher-config-dir").Changed && m.RancherConfigDir != "" {
+		if m.StaticConfig.RancherIntegration == nil {
+			m.StaticConfig.RancherIntegration = &config.RancherConfig{}
+		}
+		m.StaticConfig.RancherIntegration.ConfigDir = m.RancherConfigDir
+	} else if m.StaticConfig.RancherIntegration != nil && m.StaticConfig.RancherIntegration.ConfigDir == "" {
+		// Default to kubeconfig-dir if not specified
+		if m.StaticConfig.KubeConfigDir != "" {
+			m.StaticConfig.RancherIntegration.ConfigDir = m.StaticConfig.KubeConfigDir
+		} else {
+			m.StaticConfig.RancherIntegration.ConfigDir = "~/.kube/rancher"
+		}
 	}
 }
 

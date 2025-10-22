@@ -68,19 +68,6 @@ func (s *Server) initClusters() []server.ServerTool {
 			mcp.WithOpenWorldHintAnnotation(true),
 		), Handler: s.clustersStatus},
 
-		{Tool: mcp.NewTool("clusters_exec_all",
-			mcp.WithDescription("Execute a Kubernetes operation across all clusters in multi-cluster mode"),
-			mcp.WithString("operation", mcp.Description("MCP tool operation to execute (e.g., 'pods_list', 'namespaces_list')"), mcp.Required()),
-			mcp.WithObject("arguments", mcp.Description("Arguments to pass to the operation (as JSON object)")),
-			mcp.WithArray("clusters", mcp.Description("Specific clusters to target (optional, targets all if not provided)")),
-			mcp.WithBoolean("continue_on_error", mcp.Description("Continue execution on other clusters if one fails")),
-			// Tool annotations
-			mcp.WithTitleAnnotation("Clusters: Execute on All"),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(true),
-			mcp.WithOpenWorldHintAnnotation(false),
-		), Handler: s.clustersExecAll},
-
 		{Tool: mcp.NewTool("clusters_refresh",
 			mcp.WithDescription("Refresh the cluster list and update cluster information"),
 			mcp.WithBoolean("force", mcp.Description("Force refresh even if recently updated")),
@@ -204,10 +191,9 @@ func (s *Server) clustersSwitch(ctx context.Context, req mcp.CallToolRequest) (*
 		return NewTextResult("", fmt.Errorf("cluster switch failed: expected %s but active cluster is %s", clusterName, newActiveCluster)), nil
 	}
 
-	// Refresh the Manager instance to reflect the new active cluster
-	if err := s.reloadKubernetesClient(); err != nil {
-		return NewTextResult("", fmt.Errorf("failed to reload Kubernetes client: %w", err)), nil
-	}
+	// With fresh manager approach, we don't need to update s.k
+	// Each operation will create its own fresh manager
+	// This eliminates all state persistence issues
 
 	result := fmt.Sprintf("Successfully switched from cluster '%s' to '%s'", previousCluster, clusterName)
 	return NewTextResult(result, nil), nil
@@ -251,13 +237,6 @@ func (s *Server) checkClusterStatus(ctx context.Context, clusterName string) Clu
 		Status: "Unknown",
 	}
 
-	// Get cluster manager for this cluster
-	manager, err := s.clusterManager.GetManager(clusterName)
-	if err != nil {
-		status.LastError = fmt.Sprintf("cluster not found: %v", err)
-		return status
-	}
-
 	// Check if this is the active cluster
 	clusters := s.clusterManager.ListClusters()
 	for _, c := range clusters {
@@ -267,26 +246,35 @@ func (s *Server) checkClusterStatus(ctx context.Context, clusterName string) Clu
 		}
 	}
 
-	// Test API connectivity using discovery client
-	discoveryClient, err := manager.ToDiscoveryClient()
+	// Use WithFreshManagerForCluster to ensure proper cleanup
+	err := s.clusterManager.WithFreshManagerForCluster(clusterName, func(manager *kubernetes.Manager) error {
+		// Test API connectivity using discovery client
+		discoveryClient, err := manager.ToDiscoveryClient()
+		if err != nil {
+			status.Status = "NotReady"
+			status.LastError = fmt.Sprintf("Failed to get discovery client: %v", err)
+			return nil // Don't return error, we've already captured it
+		}
+
+		start := time.Now()
+		version, err := discoveryClient.ServerVersion()
+		status.APILatency = time.Since(start)
+
+		if err != nil {
+			status.Status = "NotReady"
+			status.LastError = err.Error()
+			return nil // Don't return error, we've already captured it
+		}
+
+		status.Status = "Ready"
+		status.Version = version.GitVersion
+		return nil
+	})
+
 	if err != nil {
 		status.Status = "NotReady"
-		status.LastError = fmt.Sprintf("Failed to get discovery client: %v", err)
-		return status
+		status.LastError = fmt.Sprintf("Failed to create manager: %v", err)
 	}
-
-	start := time.Now()
-	version, err := discoveryClient.ServerVersion()
-	status.APILatency = time.Since(start)
-
-	if err != nil {
-		status.Status = "NotReady"
-		status.LastError = err.Error()
-		return status
-	}
-
-	status.Status = "Ready"
-	status.Version = version.GitVersion
 
 	// For more detailed status, we would need to create a derived Kubernetes client
 	// But for now, we'll keep it simple with just the discovery check
@@ -381,130 +369,13 @@ func (s *Server) formatDetailedClusterStatus(status ClusterStatus) *mcp.CallTool
 	return NewTextResult(result.String(), nil)
 }
 
-// clustersExecAll handles the clusters_exec_all tool
-func (s *Server) clustersExecAll(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	args := req.GetArguments()
-	operation, ok := args["operation"].(string)
-	if !ok || operation == "" {
-		return NewTextResult("", fmt.Errorf("operation is required")), nil
-	}
-
-	k8s, err := s.getKubernetesWithMultiCluster()
-	if err != nil {
-		return NewTextResult("", fmt.Errorf("failed to get Kubernetes client: %w", err)), nil
-	}
-
-	// Get target clusters
-	var targetClusters []string
-	if clustersArg, ok := args["clusters"].([]interface{}); ok {
-		for _, c := range clustersArg {
-			if clusterName, ok := c.(string); ok {
-				targetClusters = append(targetClusters, clusterName)
-			}
-		}
-	}
-
-	// If no specific clusters provided, use all clusters
-	if len(targetClusters) == 0 {
-		clusters := k8s.ListClusters()
-		for _, cluster := range clusters {
-			targetClusters = append(targetClusters, cluster.Name)
-		}
-	}
-
-	continueOnError, _ := args["continue_on_error"].(bool)
-	operationArgs, _ := args["arguments"].(map[string]interface{})
-
-	var output strings.Builder
-	output.WriteString(fmt.Sprintf("Executing '%s' across %d clusters\n", operation, len(targetClusters)))
-	output.WriteString("==========================================\n\n")
-
-	originalCluster := k8s.GetActiveCluster()
-	successCount := 0
-	errorCount := 0
-
-	for _, clusterName := range targetClusters {
-		output.WriteString(fmt.Sprintf("Cluster: %s\n", clusterName))
-		output.WriteString("----------\n")
-
-		// Switch to the target cluster
-		if err := k8s.SwitchCluster(clusterName); err != nil {
-			output.WriteString(fmt.Sprintf("ERROR: Failed to switch to cluster: %v\n\n", err))
-			errorCount++
-			if !continueOnError {
-				break
-			}
-			continue
-		}
-
-		// Reload Kubernetes client for this cluster
-		if err := s.reloadKubernetesClient(); err != nil {
-			output.WriteString(fmt.Sprintf("ERROR: Failed to reload client: %v\n\n", err))
-			errorCount++
-			if !continueOnError {
-				break
-			}
-			continue
-		}
-
-		// Execute the operation dynamically
-		result, err := s.executeOperation(ctx, operation, operationArgs)
-		if err != nil {
-			output.WriteString(fmt.Sprintf("ERROR: %v\n\n", err))
-			errorCount++
-			if !continueOnError {
-				break
-			}
-			continue
-		}
-
-		// Append the operation result
-		output.WriteString(result)
-		output.WriteString("\n\n")
-		successCount++
-	}
-
-	// Switch back to original cluster
-	if originalCluster != "" {
-		k8s.SwitchCluster(originalCluster)
-		s.reloadKubernetesClient()
-	}
-
-	output.WriteString(fmt.Sprintf("Summary: %d successful, %d failed\n", successCount, errorCount))
-
-	return NewTextResult(output.String(), nil), nil
-}
-
 // clustersRefresh handles the clusters_refresh tool
 func (s *Server) clustersRefresh(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	args := req.GetArguments()
-	force, _ := args["force"].(bool)
-
 	if s.clusterManager == nil {
 		return NewTextResult("", fmt.Errorf("cluster manager not initialized")), nil
 	}
 
 	var result strings.Builder
-
-	// If NSK integration is enabled, use it for refresh
-	if s.nsk != nil {
-		if !force {
-			// Check if recently refreshed
-			lastRefresh := s.nsk.GetLastRefreshTime()
-			if time.Since(lastRefresh) < 5*time.Minute {
-				result.WriteString(fmt.Sprintf("Clusters were recently refreshed at %s\n", lastRefresh.Format(time.RFC3339)))
-				result.WriteString("Use 'force: true' to force refresh\n")
-				return NewTextResult(result.String(), nil), nil
-			}
-		}
-
-		// Refresh via NSK
-		if err := s.nsk.RefreshKubeConfigs(ctx); err != nil {
-			return NewTextResult("", fmt.Errorf("failed to refresh kubeconfigs via NSK: %w", err)), nil
-		}
-
-		result.WriteString("Successfully refreshed kubeconfigs from Rancher via NSK\n")
-	}
 
 	// Refresh clusters
 	if err := s.clusterManager.RefreshClusters(ctx); err != nil {

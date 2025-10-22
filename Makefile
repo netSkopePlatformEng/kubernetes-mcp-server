@@ -15,6 +15,9 @@ LD_FLAGS = -s -w \
 	-X '$(PACKAGE)/pkg/version.BinaryName=$(BINARY_NAME)'
 COMMON_BUILD_ARGS = -ldflags "$(LD_FLAGS)"
 
+# GoReleaser configuration
+GORELEASER := $(shell which goreleaser 2>/dev/null)
+
 GOLANGCI_LINT = $(shell pwd)/_output/tools/bin/golangci-lint
 GOLANGCI_LINT_VERSION ?= v2.2.2
 
@@ -44,18 +47,71 @@ help: ## Display this help
 
 .PHONY: clean
 clean: ## Clean up all build artifacts
-	rm -rf $(CLEAN_TARGETS)
+	rm -rf $(CLEAN_TARGETS) dist/
+
+##@ Build
 
 .PHONY: build
-build: clean tidy format ## Build the project
+build: tidy format ## Build the project for current platform
+ifdef GORELEASER
+	@echo "Building with GoReleaser..."
+	goreleaser build --snapshot --clean --single-target
+	@cp dist/kubernetes-mcp-server_*/kubernetes-mcp-server ./$(BINARY_NAME) 2>/dev/null || \
+		cp dist/kubernetes-mcp-server_*/kubernetes-mcp-server.exe ./$(BINARY_NAME).exe 2>/dev/null || true
+else
+	@echo "Building with go build (install goreleaser for better builds)..."
 	go build $(COMMON_BUILD_ARGS) -o $(BINARY_NAME) ./cmd/kubernetes-mcp-server
-
+endif
 
 .PHONY: build-all-platforms
-build-all-platforms: clean tidy format ## Build the project for all platforms
+build-all-platforms: tidy format ## Build the project for all platforms using GoReleaser
+ifdef GORELEASER
+	@echo "Building all platforms with GoReleaser..."
+	goreleaser build --snapshot --clean
+else
+	@echo "Building all platforms with go build..."
 	$(foreach os,$(OSES),$(foreach arch,$(ARCHS), \
 		GOOS=$(os) GOARCH=$(arch) go build $(COMMON_BUILD_ARGS) -o $(BINARY_NAME)-$(os)-$(arch)$(if $(findstring windows,$(os)),.exe,) ./cmd/kubernetes-mcp-server; \
 	))
+endif
+
+##@ GoReleaser
+
+.PHONY: goreleaser-check
+goreleaser-check: ## Check GoReleaser configuration
+ifdef GORELEASER
+	goreleaser check
+else
+	@echo "GoReleaser not installed. Install with: go install github.com/goreleaser/goreleaser/v2@latest"
+	@exit 1
+endif
+
+.PHONY: snapshot
+snapshot: ## Create a snapshot release with GoReleaser
+ifdef GORELEASER
+	goreleaser release --snapshot --clean
+else
+	@echo "GoReleaser not installed. Install with: go install github.com/goreleaser/goreleaser/v2@latest"
+	@exit 1
+endif
+
+.PHONY: release
+release: ## Create a release with GoReleaser (requires tag)
+ifdef GORELEASER
+	goreleaser release --clean
+else
+	@echo "GoReleaser not installed. Install with: go install github.com/goreleaser/goreleaser/v2@latest"
+	@exit 1
+endif
+
+.PHONY: release-dry-run
+release-dry-run: ## Dry run of release process
+ifdef GORELEASER
+	goreleaser release --skip=publish,announce,sign --clean
+else
+	@echo "GoReleaser not installed. Install with: go install github.com/goreleaser/goreleaser/v2@latest"
+	@exit 1
+endif
 
 .PHONY: npm-copy-binaries
 npm-copy-binaries: build-all-platforms ## Copy the binaries to each npm package

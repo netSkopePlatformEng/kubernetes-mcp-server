@@ -10,6 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/klog/v2"
 
 	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/kubernetes"
 	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/output"
@@ -17,7 +18,8 @@ import (
 
 func (s *Server) initResources() []server.ServerTool {
 	commonApiVersion := "v1 Pod, v1 Service, v1 Node, apps/v1 Deployment, networking.k8s.io/v1 Ingress"
-	if s.k.IsOpenShift(context.Background()) {
+	// Only check for OpenShift if we have an active cluster
+	if s.k != nil && s.k.IsOpenShift(context.Background()) {
 		commonApiVersion += ", route.openshift.io/v1 Route"
 	}
 	commonApiVersion = fmt.Sprintf("(common apiVersion and kind include: %s)", commonApiVersion)
@@ -130,11 +132,52 @@ func (s *Server) resourcesList(ctx context.Context, ctr mcp.CallToolRequest) (*m
 		return NewTextResult("", fmt.Errorf("namespace is not a string")), nil
 	}
 
-	derived, err := s.k.Derived(ctx)
-	if err != nil {
-		return nil, err
+	// Get the appropriate Kubernetes instance
+	var k8s *kubernetes.Kubernetes
+
+	if s.configuration.StaticConfig.IsMultiClusterEnabled() && s.clusterManager != nil {
+		// In multi-cluster mode, create a fresh manager for this operation (kubectl-style)
+		activeCluster := s.clusterManager.GetActiveCluster()
+		klog.Infof("resourcesList: Multi-cluster mode, active cluster: %s", activeCluster)
+
+		// Use WithFreshManager to ensure proper cleanup
+		var result *mcp.CallToolResult
+		err = s.clusterManager.WithFreshManager(func(manager *kubernetes.Manager) error {
+			// Log the manager's server
+			if restConfig, err := manager.ToRESTConfig(); err == nil && restConfig != nil {
+				klog.Infof("resourcesList: Fresh manager for cluster %s, server: %s", activeCluster, restConfig.Host)
+			}
+
+			// Create a Kubernetes instance with the fresh manager
+			k8s, err = manager.Derived(ctx)
+			if err != nil {
+				return err
+			}
+
+			// Execute the operation with the fresh client
+			ret, err := k8s.ResourcesList(ctx, gvk, ns, resourceListOptions)
+			if err != nil {
+				errorMsg := s.formatKubernetesError(err)
+				result = NewTextResult("", fmt.Errorf("failed to list resources: %s", errorMsg))
+				return nil // Don't return error, we've already formatted it
+			}
+			result = NewTextResult(s.configuration.ListOutput.PrintObj(ret))
+			return nil
+		})
+
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	} else {
+		// In single-cluster mode, use the regular derived instance
+		k8s, err = s.k.Derived(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
-	ret, err := derived.ResourcesList(ctx, gvk, ns, resourceListOptions)
+
+	ret, err := k8s.ResourcesList(ctx, gvk, ns, resourceListOptions)
 	if err != nil {
 		errorMsg := s.formatKubernetesError(err)
 		return NewTextResult("", fmt.Errorf("failed to list resources: %s", errorMsg)), nil

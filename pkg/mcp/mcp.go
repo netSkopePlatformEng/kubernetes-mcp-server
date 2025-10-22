@@ -15,6 +15,7 @@ import (
 
 	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
 	internalk8s "github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/kubernetes"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/mcp/jobs"
 	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/output"
 	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/version"
 )
@@ -51,9 +52,10 @@ type Server struct {
 	server         *server.MCPServer
 	enabledTools   []string
 	k              *internalk8s.Manager
-	k8s            *internalk8s.Kubernetes          // Add persistent Kubernetes instance for multi-cluster
-	clusterManager *internalk8s.MultiClusterManager // Multi-cluster manager
-	nsk            *internalk8s.NSKIntegration      // NSK integration for Rancher kubeconfig management
+	k8s            *internalk8s.Kubernetes               // Add persistent Kubernetes instance for multi-cluster
+	clusterManager *internalk8s.FreshMultiClusterManager // Fresh multi-cluster manager (kubectl-style)
+	rancher        *internalk8s.RancherIntegration       // Rancher integration for kubeconfig management
+	jobManager     *jobs.Manager                         // Job manager for async long-running tasks
 }
 
 func NewServer(configuration Configuration) (*Server, error) {
@@ -85,10 +87,18 @@ func NewServer(configuration Configuration) (*Server, error) {
 		}
 	}
 
+	// Initialize JobManager for async long-running tasks
+	if err := s.initializeJobManager(); err != nil {
+		return nil, fmt.Errorf("failed to initialize job manager: %w", err)
+	}
+
 	if err := s.reloadKubernetesClient(); err != nil {
 		return nil, err
 	}
-	s.k.WatchKubeConfig(s.reloadKubernetesClient)
+	// Only watch kubeconfig if we have an active manager
+	if s.k != nil {
+		s.k.WatchKubeConfig(s.reloadKubernetesClient)
+	}
 
 	return s, nil
 }
@@ -97,24 +107,21 @@ func NewServer(configuration Configuration) (*Server, error) {
 func (s *Server) initializeMultiCluster() error {
 	logger := klog.Background()
 
-	// Initialize multi-cluster manager
-	mcm, err := internalk8s.NewMultiClusterManager(s.configuration.StaticConfig, logger)
+	// Initialize fresh multi-cluster manager (kubectl-style - creates fresh clients per operation)
+	mcm, err := internalk8s.NewFreshMultiClusterManager(s.configuration.StaticConfig, logger)
 	if err != nil {
-		return fmt.Errorf("failed to create multi-cluster manager: %w", err)
+		return fmt.Errorf("failed to create fresh multi-cluster manager: %w", err)
 	}
 	s.clusterManager = mcm
 
-	// Initialize NSK integration if configured
-	if s.configuration.StaticConfig.IsNSKEnabled() {
-		s.nsk = internalk8s.NewNSKIntegrationForMCM(s.configuration.StaticConfig.NSKIntegration, s.clusterManager)
-
-		// Start NSK integration
-		ctx := context.Background()
-		if err := s.nsk.Start(ctx); err != nil {
-			logger.Error(err, "Failed to start NSK integration")
-			// Don't fail if NSK fails to start - clusters can still be managed manually
-		}
-	}
+	// Initialize Rancher integration if configured
+	// TODO: Update RancherIntegration to work with SimpleMultiClusterManager
+	// if s.configuration.StaticConfig.IsRancherEnabled() {
+	//	s.rancher = internalk8s.NewRancherIntegration(s.configuration.StaticConfig.RancherIntegration, s.clusterManager)
+	//	logger.Info("Rancher integration initialized",
+	//		"url", s.configuration.StaticConfig.RancherIntegration.URL,
+	//		"config_dir", s.configuration.StaticConfig.RancherIntegration.ConfigDir)
+	// }
 
 	// Start the multi-cluster manager
 	ctx := context.Background()
@@ -125,7 +132,29 @@ func (s *Server) initializeMultiCluster() error {
 
 	logger.Info("Multi-cluster support initialized",
 		"clusters", len(s.clusterManager.ListClusters()),
-		"nsk_enabled", s.configuration.StaticConfig.IsNSKEnabled())
+		"rancher_enabled", s.configuration.StaticConfig.IsRancherEnabled())
+
+	return nil
+}
+
+// initializeJobManager initializes the job manager for async long-running tasks
+func (s *Server) initializeJobManager() error {
+	logger := klog.Background()
+
+	// Create job manager with default configuration
+	config := jobs.DefaultManagerConfig()
+	// Override with custom settings if needed
+	config.StorageDir = "~/.mcp/jobs"
+	config.MaxJobs = 100
+	config.WorkerCount = 5
+
+	jobManager, err := jobs.NewManager(config)
+	if err != nil {
+		return fmt.Errorf("failed to create job manager: %w", err)
+	}
+
+	s.jobManager = jobManager
+	logger.Info("JobManager initialized", "workers", config.WorkerCount, "maxJobs", config.MaxJobs)
 
 	return nil
 }
@@ -138,32 +167,48 @@ func (s *Server) reloadKubernetesClient() error {
 		// Create or reuse the multi-cluster Kubernetes instance
 		if s.k8s == nil {
 			logger.V(2).Info("Creating new multi-cluster Kubernetes instance")
-			k8s, err := internalk8s.NewKubernetes(s.configuration.StaticConfig, logger)
-			if err != nil {
-				logger.Error(err, "Failed to create multi-cluster Kubernetes instance")
-				return err
+			// Use the existing clusterManager if available, otherwise create a new one
+			if s.clusterManager != nil {
+				// Use existing cluster manager to maintain cluster switch state
+				s.k8s = internalk8s.NewKubernetesWithFreshMultiClusterManager(s.clusterManager)
+				logger.V(2).Info("Created Kubernetes instance with existing fresh cluster manager")
+			} else {
+				// Create new instance (should not happen in multi-cluster mode)
+				k8s, err := internalk8s.NewKubernetes(s.configuration.StaticConfig, logger)
+				if err != nil {
+					logger.Error(err, "Failed to create multi-cluster Kubernetes instance")
+					return err
+				}
+				s.k8s = k8s
 			}
-			s.k8s = k8s
 		}
 
 		// Get the Manager from the Kubernetes instance (which reflects current active cluster)
 		activeCluster := s.k8s.GetActiveCluster()
-		logger.V(2).Info("Getting manager for active cluster", "cluster", activeCluster)
 
-		manager, err := s.k8s.GetManager()
-		if err != nil {
-			logger.Error(err, "Failed to get manager for active cluster", "cluster", activeCluster)
-			return err
+		// If there are no clusters yet (empty kubeconfig directory), skip manager initialization
+		// Tools will fail gracefully when called if no cluster is active
+		if activeCluster == "" {
+			logger.V(2).Info("No clusters available yet, skipping manager initialization")
+			s.k = nil
+		} else {
+			logger.V(2).Info("Getting manager for active cluster", "cluster", activeCluster)
+
+			manager, err := s.k8s.GetManager()
+			if err != nil {
+				logger.Error(err, "Failed to get manager for active cluster", "cluster", activeCluster)
+				return err
+			}
+
+			// Validate the manager has proper configuration
+			restConfig, err := manager.ToRESTConfig()
+			if err != nil || restConfig == nil {
+				return fmt.Errorf("manager for cluster %s has no valid rest config: %w", activeCluster, err)
+			}
+
+			logger.V(2).Info("Successfully reloaded manager", "cluster", activeCluster, "server", restConfig.Host)
+			s.k = manager
 		}
-
-		// Validate the manager has proper configuration
-		restConfig, err := manager.ToRESTConfig()
-		if err != nil || restConfig == nil {
-			return fmt.Errorf("manager for cluster %s has no valid rest config: %w", activeCluster, err)
-		}
-
-		logger.V(2).Info("Successfully reloaded manager", "cluster", activeCluster, "server", restConfig.Host)
-		s.k = manager
 	} else {
 		// Use legacy single-cluster manager
 		logger.V(2).Info("Creating single-cluster manager")
@@ -182,7 +227,10 @@ func (s *Server) reloadKubernetesClient() error {
 		applicableTools = append(applicableTools, tool)
 		s.enabledTools = append(s.enabledTools, tool.Tool.Name)
 	}
-	s.server.SetTools(applicableTools...)
+	// Only set tools if server is initialized (not nil in tests)
+	if s.server != nil {
+		s.server.SetTools(applicableTools...)
+	}
 	return nil
 }
 

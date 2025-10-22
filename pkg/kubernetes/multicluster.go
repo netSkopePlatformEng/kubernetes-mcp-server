@@ -12,7 +12,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
-	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/nsk"
 )
 
 // MultiClusterManager extends the existing Manager to support multiple clusters
@@ -20,7 +19,6 @@ type MultiClusterManager struct {
 	staticConfig  *config.StaticConfig
 	clusters      map[string]*Manager
 	activeCluster string
-	nskManager    *nsk.Manager
 	healthMonitor *ClusterHealthMonitor
 	logger        klog.Logger
 	mutex         sync.RWMutex
@@ -48,15 +46,6 @@ func NewMultiClusterManager(staticConfig *config.StaticConfig, logger klog.Logge
 		logger:       logger,
 	}
 
-	// Initialize NSK manager if NSK integration is enabled
-	if staticConfig.IsNSKEnabled() {
-		var err error
-		mcm.nskManager, err = nsk.NewManager(staticConfig.NSKIntegration, logger)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create NSK manager: %w", err)
-		}
-	}
-
 	// Initialize health monitor
 	healthConfig := DefaultClusterHealthConfig()
 	mcm.healthMonitor = NewClusterHealthMonitor(healthConfig, logger, mcm.performHealthCheck)
@@ -67,13 +56,6 @@ func NewMultiClusterManager(staticConfig *config.StaticConfig, logger klog.Logge
 // Start initializes the multi-cluster manager and discovers clusters
 func (mcm *MultiClusterManager) Start(ctx context.Context) error {
 	mcm.logger.Info("Starting multi-cluster manager")
-
-	// Start NSK manager if enabled
-	if mcm.nskManager != nil {
-		if err := mcm.nskManager.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start NSK manager: %w", err)
-		}
-	}
 
 	// Discover and initialize clusters
 	if err := mcm.DiscoverClusters(ctx); err != nil {
@@ -112,10 +94,6 @@ func (mcm *MultiClusterManager) Stop() {
 		mcm.healthMonitor.Stop()
 	}
 
-	if mcm.nskManager != nil {
-		mcm.nskManager.Stop()
-	}
-
 	// Clean up all cluster managers
 	mcm.mutex.Lock()
 	for name, manager := range mcm.clusters {
@@ -128,26 +106,14 @@ func (mcm *MultiClusterManager) Stop() {
 	mcm.logger.Info("Multi-cluster manager stopped")
 }
 
-// DiscoverClusters discovers available clusters from kubeconfig directory or NSK
+// DiscoverClusters discovers available clusters from kubeconfig directory
 func (mcm *MultiClusterManager) DiscoverClusters(ctx context.Context) error {
 	mcm.logger.V(2).Info("Discovering clusters")
 
-	var discoveredClusters map[string]string // name -> kubeconfig path
-
-	if mcm.nskManager != nil {
-		// Use NSK to discover clusters
-		nskClusters := mcm.nskManager.GetClusters()
-		discoveredClusters = make(map[string]string)
-		for name, cluster := range nskClusters {
-			discoveredClusters[name] = cluster.KubeConfig
-		}
-	} else {
-		// Scan kubeconfig directory
-		var err error
-		discoveredClusters, err = mcm.scanKubeConfigDirectory()
-		if err != nil {
-			return fmt.Errorf("failed to scan kubeconfig directory: %w", err)
-		}
+	// Scan kubeconfig directory
+	discoveredClusters, err := mcm.scanKubeConfigDirectory()
+	if err != nil {
+		return fmt.Errorf("failed to scan kubeconfig directory: %w", err)
 	}
 
 	// Apply cluster aliases
@@ -239,6 +205,12 @@ func (mcm *MultiClusterManager) scanKubeConfigDirectory() (map[string]string, er
 			clusterName := strings.TrimSuffix(basename, filepath.Ext(basename))
 			clusters[clusterName] = path
 			mcm.logger.V(2).Info("Discovered cluster config", "cluster", clusterName, "path", path)
+
+			// Ensure kubeconfig file has secure permissions (0600 = rw-------)
+			if err := os.Chmod(path, 0600); err != nil {
+				mcm.logger.Error(err, "Failed to set secure permissions on kubeconfig", "path", path)
+				// Don't fail discovery, just log the error
+			}
 		} else {
 			mcm.logger.V(3).Info("Skipping non-YAML file", "path", path)
 		}
@@ -281,19 +253,25 @@ func (mcm *MultiClusterManager) applyClusterAliases(clusters map[string]string) 
 func (mcm *MultiClusterManager) createClusterManager(clusterName, kubeconfigPath string) (*Manager, error) {
 	mcm.logger.V(2).Info("Creating manager for cluster", "cluster", clusterName, "kubeconfig", kubeconfigPath)
 
-	// Create a copy of the static config with the specific kubeconfig
-	clusterConfig := *mcm.staticConfig
-	clusterConfig.KubeConfig = kubeconfigPath
-	clusterConfig.KubeConfigDir = "" // Clear multi-cluster config to use single kubeconfig
-
-	// Force fresh client creation by clearing any cached configurations
-	// This ensures we don't inherit stale authentication state
+	// Create a completely new static config for each cluster to ensure isolation
+	clusterConfig := &config.StaticConfig{
+		KubeConfig:         kubeconfigPath,
+		KubeConfigDir:      "", // Clear multi-cluster config to use single kubeconfig
+		ReadOnly:           mcm.staticConfig.ReadOnly,
+		DisableDestructive: mcm.staticConfig.DisableDestructive,
+		EnabledTools:       mcm.staticConfig.EnabledTools,
+		DisabledTools:      mcm.staticConfig.DisabledTools,
+		RequireOAuth:       mcm.staticConfig.RequireOAuth,
+		DefaultCluster:     mcm.staticConfig.DefaultCluster,
+		ClusterAliases:     mcm.staticConfig.ClusterAliases,
+		RancherIntegration: mcm.staticConfig.RancherIntegration,
+	}
 
 	mcm.logger.V(3).Info("Creating manager with config", "cluster", clusterName,
 		"kubeconfig", clusterConfig.KubeConfig)
 
 	// Create manager for this cluster
-	manager, err := NewManager(&clusterConfig)
+	manager, err := NewManager(clusterConfig)
 	if err != nil {
 		mcm.logger.Error(err, "Failed to create manager", "cluster", clusterName, "kubeconfig", kubeconfigPath)
 		return nil, fmt.Errorf("failed to create manager for cluster %s: %w", clusterName, err)
@@ -305,8 +283,37 @@ func (mcm *MultiClusterManager) createClusterManager(clusterName, kubeconfigPath
 		return nil, fmt.Errorf("cluster %s manager has invalid rest config: %w", clusterName, err)
 	}
 
-	mcm.logger.V(2).Info("Successfully created manager for cluster", "cluster", clusterName,
-		"server", restConfig.Host)
+	// Validate authentication is configured
+	authMethod := "unknown"
+	if restConfig.BearerToken != "" || restConfig.BearerTokenFile != "" {
+		authMethod = "bearer-token"
+		mcm.logger.V(3).Info("Cluster has bearer token authentication",
+			"cluster", clusterName,
+			"tokenLength", len(restConfig.BearerToken),
+			"tokenFile", restConfig.BearerTokenFile)
+	} else if restConfig.Username != "" && restConfig.Password != "" {
+		authMethod = "basic-auth"
+	} else if (restConfig.CertFile != "" && restConfig.KeyFile != "") ||
+		(len(restConfig.CertData) > 0 && len(restConfig.KeyData) > 0) {
+		authMethod = "client-cert"
+	} else if restConfig.ExecProvider != nil {
+		authMethod = "exec-provider"
+	} else if restConfig.AuthProvider != nil {
+		authMethod = "auth-provider"
+	}
+
+	if authMethod == "unknown" {
+		mcm.logger.V(1).Info("WARNING: Cluster manager has no authentication configured",
+			"cluster", clusterName,
+			"server", restConfig.Host)
+		// Don't fail here, as the cluster might still work with anonymous access
+		// or the authentication might be handled differently
+	}
+
+	mcm.logger.V(2).Info("Successfully created manager for cluster",
+		"cluster", clusterName,
+		"server", restConfig.Host,
+		"authMethod", authMethod)
 
 	return manager, nil
 }
@@ -351,16 +358,40 @@ func (mcm *MultiClusterManager) SwitchCluster(clusterName string) error {
 			return "unknown"
 		}())
 
+	// Validate cluster connectivity before switching
+	if err := mcm.validateClusterConnection(manager, clusterName); err != nil {
+		mcm.logger.Error(err, "Cluster validation failed", "cluster", clusterName)
+		return fmt.Errorf("cluster %s is not reachable: %w", clusterName, err)
+	}
+
 	// Switch to the new cluster - each manager is pre-configured with its own kubeconfig
 	mcm.activeCluster = clusterName
 
-	// Note: We skip synchronous health check here to avoid blocking the response.
-	// The background health monitor will check cluster health asynchronously.
+	// Log detailed information about the new active cluster's authentication
+	if restConfig, err := manager.ToRESTConfig(); err == nil && restConfig != nil {
+		authInfo := "unknown"
+		if restConfig.BearerToken != "" {
+			authInfo = fmt.Sprintf("bearer-token (%d chars)", len(restConfig.BearerToken))
+		} else if restConfig.BearerTokenFile != "" {
+			authInfo = fmt.Sprintf("bearer-token-file (%s)", restConfig.BearerTokenFile)
+		} else if restConfig.Username != "" {
+			authInfo = "basic-auth"
+		} else if restConfig.CertFile != "" || len(restConfig.CertData) > 0 {
+			authInfo = "client-cert"
+		}
 
-	mcm.logger.Info("Switched cluster",
-		"from", previousCluster,
-		"to", clusterName,
-		"kubeconfig", manager.staticConfig.KubeConfig)
+		mcm.logger.Info("Switched cluster",
+			"from", previousCluster,
+			"to", clusterName,
+			"kubeconfig", manager.staticConfig.KubeConfig,
+			"server", restConfig.Host,
+			"auth", authInfo)
+	} else {
+		mcm.logger.Info("Switched cluster",
+			"from", previousCluster,
+			"to", clusterName,
+			"kubeconfig", manager.staticConfig.KubeConfig)
+	}
 
 	return nil
 }
@@ -416,15 +447,6 @@ func (mcm *MultiClusterManager) ListClusters() []ClusterConfig {
 			IsActive:   name == mcm.activeCluster,
 		}
 
-		// Get additional info from NSK if available
-		if mcm.nskManager != nil {
-			if nskCluster, err := mcm.nskManager.GetCluster(name); err == nil {
-				config.Environment = nskCluster.Environment
-				config.Description = nskCluster.Description
-				config.LastAccessed = nskCluster.LastRefresh
-			}
-		}
-
 		clusters = append(clusters, config)
 	}
 
@@ -443,24 +465,44 @@ func (mcm *MultiClusterManager) ValidateCluster(clusterName string) error {
 		return fmt.Errorf("cluster %s has invalid configuration", clusterName)
 	}
 
-	// Additional validation via NSK if available
-	if mcm.nskManager != nil {
-		return mcm.nskManager.ValidateCluster(clusterName)
+	return nil
+}
+
+// validateClusterConnection performs a quick connectivity check to the cluster API server
+func (mcm *MultiClusterManager) validateClusterConnection(manager *Manager, clusterName string) error {
+	// Check if manager is nil
+	if manager == nil {
+		return fmt.Errorf("manager is nil for cluster %s", clusterName)
 	}
 
+	// Get discovery client to test API connectivity
+	discoveryClient, err := manager.ToDiscoveryClient()
+	if err != nil {
+		return fmt.Errorf("failed to create discovery client: %w", err)
+	}
+
+	// Check if discovery client is nil (can happen if manager not fully initialized)
+	if discoveryClient == nil {
+		// Manager not fully initialized - skip API connectivity test
+		mcm.logger.V(2).Info("Skipping cluster validation - discovery client not initialized", "cluster", clusterName)
+		return nil
+	}
+
+	// Perform a lightweight API call to verify connectivity with timeout
+	// ServerVersion is a simple GET request that doesn't require special permissions
+	// The timeout is handled by the underlying HTTP client configuration
+	_, err = discoveryClient.ServerVersion()
+	if err != nil {
+		return fmt.Errorf("failed to connect to cluster API: %w", err)
+	}
+
+	mcm.logger.V(2).Info("Cluster connection validated", "cluster", clusterName)
 	return nil
 }
 
 // RefreshClusters refreshes the cluster list
 func (mcm *MultiClusterManager) RefreshClusters(ctx context.Context) error {
 	mcm.logger.V(2).Info("Refreshing clusters")
-
-	// Refresh NSK clusters if NSK is enabled
-	if mcm.nskManager != nil {
-		if err := mcm.nskManager.RefreshClusters(ctx); err != nil {
-			return fmt.Errorf("NSK cluster refresh failed: %w", err)
-		}
-	}
 
 	// Rediscover clusters
 	return mcm.DiscoverClusters(ctx)
@@ -471,19 +513,6 @@ func (mcm *MultiClusterManager) GetClusterCount() int {
 	mcm.mutex.RLock()
 	defer mcm.mutex.RUnlock()
 	return len(mcm.clusters)
-}
-
-// IsNSKEnabled returns true if NSK integration is enabled
-func (mcm *MultiClusterManager) IsNSKEnabled() bool {
-	return mcm.nskManager != nil
-}
-
-// GetNSKStatus returns the NSK manager status if NSK is enabled
-func (mcm *MultiClusterManager) GetNSKStatus() *nsk.ManagerStatus {
-	if mcm.nskManager == nil {
-		return nil
-	}
-	return mcm.nskManager.GetStatus()
 }
 
 // performHealthCheck performs a health check on a specific cluster

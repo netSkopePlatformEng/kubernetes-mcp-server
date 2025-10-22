@@ -74,7 +74,6 @@ users:
 			"clusters_list",
 			"clusters_switch",
 			"clusters_status",
-			"clusters_exec_all",
 			"clusters_refresh",
 		}
 
@@ -552,138 +551,6 @@ users:
 	})
 }
 
-func TestServer_clustersExecAll(t *testing.T) {
-	// Create test kubeconfig directory
-	tempDir := t.TempDir()
-	kubeconfigDir := path.Join(tempDir, "kubeconfigs")
-	if err := os.MkdirAll(kubeconfigDir, 0755); err != nil {
-		t.Fatalf("failed to create kubeconfig directory: %v", err)
-	}
-
-	kubeconfigContent := `
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    server: https://test-cluster.example.com
-  name: test-cluster
-contexts:
-- context:
-    cluster: test-cluster
-    user: test-user
-  name: test-context
-current-context: test-context
-users:
-- name: test-user
-  user:
-    username: test-username
-    password: test-password
-`
-	cluster1Path := path.Join(kubeconfigDir, "cluster1.yaml")
-	cluster2Path := path.Join(kubeconfigDir, "cluster2.yaml")
-
-	if err := os.WriteFile(cluster1Path, []byte(kubeconfigContent), 0644); err != nil {
-		t.Fatalf("failed to create cluster1 kubeconfig: %v", err)
-	}
-	if err := os.WriteFile(cluster2Path, []byte(kubeconfigContent), 0644); err != nil {
-		t.Fatalf("failed to create cluster2 kubeconfig: %v", err)
-	}
-
-	staticConfig := &config.StaticConfig{
-		KubeConfigDir: kubeconfigDir,
-	}
-
-	configuration := Configuration{
-		Profile:      ProfileFromString("full"),
-		ListOutput:   output.FromString("table"),
-		StaticConfig: staticConfig,
-	}
-
-	server := &Server{
-		configuration: &configuration,
-	}
-
-	t.Run("Execute operation on all clusters", func(t *testing.T) {
-		req := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Name: "clusters_exec_all",
-				Arguments: map[string]interface{}{
-					"operation": "namespaces_list",
-				},
-			},
-		}
-
-		result, err := server.clustersExecAll(context.Background(), req)
-		if err != nil {
-			t.Fatalf("clustersExecAll failed: %v", err)
-		}
-
-		if result.Content == nil {
-			t.Fatal("Expected result content to be set")
-		}
-
-		textContent, ok := result.Content[0].(mcp.TextContent)
-		if !ok {
-			t.Fatal("Expected text content")
-		}
-
-		if !contains(textContent.Text, "Executing") {
-			t.Error("Expected execution report")
-		}
-		if !contains(textContent.Text, "Summary:") {
-			t.Error("Expected summary in output")
-		}
-	})
-
-	t.Run("Execute operation on specific clusters", func(t *testing.T) {
-		req := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Name: "clusters_exec_all",
-				Arguments: map[string]interface{}{
-					"operation": "namespaces_list",
-					"clusters":  []interface{}{"cluster1"},
-				},
-			},
-		}
-
-		result, err := server.clustersExecAll(context.Background(), req)
-		if err != nil {
-			t.Fatalf("clustersExecAll failed: %v", err)
-		}
-
-		if result.Content == nil {
-			t.Fatal("Expected result content to be set")
-		}
-
-		textContent, ok := result.Content[0].(mcp.TextContent)
-		if !ok {
-			t.Fatal("Expected text content")
-		}
-
-		if !contains(textContent.Text, "cluster1") {
-			t.Error("Expected specific cluster in execution report")
-		}
-	})
-
-	t.Run("Execute without operation name", func(t *testing.T) {
-		req := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Name:      "clusters_exec_all",
-				Arguments: map[string]interface{}{},
-			},
-		}
-
-		result, err := server.clustersExecAll(context.Background(), req)
-		if err != nil {
-			t.Fatalf("clustersExecAll failed: %v", err)
-		}
-
-		if !result.IsError {
-			t.Error("Expected error for missing operation")
-		}
-	})
-}
-
 func TestServer_clustersRefresh(t *testing.T) {
 	// Create test kubeconfig directory
 	tempDir := t.TempDir()
@@ -970,12 +837,6 @@ users:
 			openWorld:    true,
 			hasArguments: true,
 		},
-		"clusters_exec_all": {
-			readOnly:     false,
-			destructive:  true,
-			openWorld:    false,
-			hasArguments: true,
-		},
 		"clusters_refresh": {
 			readOnly:     false,
 			destructive:  false,
@@ -1023,25 +884,16 @@ users:
 	}
 }
 
-// Test NSK integration with cluster refresh
-func TestServer_clustersRefreshWithNSK(t *testing.T) {
+// Test cluster refresh with multi-cluster manager
+func TestServer_clustersRefreshMultiCluster(t *testing.T) {
 	tempDir := t.TempDir()
 	kubeconfigDir := path.Join(tempDir, "kubeconfigs")
 	if err := os.MkdirAll(kubeconfigDir, 0755); err != nil {
 		t.Fatalf("failed to create kubeconfig directory: %v", err)
 	}
 
-	// Create a mock NSK integration
-	mockNSK := &kubernetes.NSKIntegration{}
-
 	staticConfig := &config.StaticConfig{
 		KubeConfigDir: kubeconfigDir,
-		NSKIntegration: &config.NSKConfig{
-			Enabled:         true,
-			RancherURL:      "https://rancher.test.com",
-			RefreshInterval: "1h",
-			AutoRefresh:     true,
-		},
 	}
 
 	configuration := Configuration{
@@ -1059,7 +911,6 @@ func TestServer_clustersRefreshWithNSK(t *testing.T) {
 	server := &Server{
 		configuration:  &configuration,
 		clusterManager: mcm,
-		nsk:            mockNSK,
 	}
 
 	ctx := context.Background()
@@ -1094,8 +945,8 @@ func TestServer_clustersRefreshWithNSK(t *testing.T) {
 	}
 }
 
-// Test cluster status with NSK integration
-func TestServer_checkClusterStatusWithNSK(t *testing.T) {
+// Test cluster status check
+func TestServer_checkClusterStatus(t *testing.T) {
 	tempDir := t.TempDir()
 	kubeconfigDir := path.Join(tempDir, "kubeconfigs")
 	if err := os.MkdirAll(kubeconfigDir, 0755); err != nil {
@@ -1350,23 +1201,23 @@ func TestServer_executeOperation(t *testing.T) {
 		// We check the switch statement coverage by confirming operations aren't "unsupported"
 
 		supportedOps := map[string]bool{
-			"resources_list":            true,
-			"resources_get":             true,
+			"resources_list":             true,
+			"resources_get":              true,
 			"resources_create_or_update": true,
-			"resources_delete":          true,
-			"pods_list":                 true,
-			"pods_list_in_namespace":    true,
-			"pods_get":                  true,
-			"pods_log":                  true,
-			"pods_exec":                 true,
-			"pods_delete":               true,
-			"pods_run":                  true,
-			"pods_top":                  true,
-			"namespaces_list":           true,
-			"events_list":               true,
-			"helm_list":                 true,
-			"helm_install":              true,
-			"helm_uninstall":            true,
+			"resources_delete":           true,
+			"pods_list":                  true,
+			"pods_list_in_namespace":     true,
+			"pods_get":                   true,
+			"pods_log":                   true,
+			"pods_exec":                  true,
+			"pods_delete":                true,
+			"pods_run":                   true,
+			"pods_top":                   true,
+			"namespaces_list":            true,
+			"events_list":                true,
+			"helm_list":                  true,
+			"helm_install":               true,
+			"helm_uninstall":             true,
 		}
 
 		// Verify the list is comprehensive by checking an unsupported one fails
@@ -1388,328 +1239,5 @@ func TestServer_executeOperation(t *testing.T) {
 		}
 
 		t.Logf("Verified %d operations are defined in executeOperation switch statement", len(supportedOps))
-	})
-}
-
-func TestServer_clustersExecAll_Implementation(t *testing.T) {
-	t.Run("Executes operation across multiple clusters", func(t *testing.T) {
-		// Setup multi-cluster environment
-		tempDir := t.TempDir()
-		kubeconfigDir := path.Join(tempDir, "kubeconfigs")
-		if err := os.MkdirAll(kubeconfigDir, 0755); err != nil {
-			t.Fatalf("failed to create kubeconfig directory: %v", err)
-		}
-
-		kubeconfigContent := `
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    server: https://test-cluster.example.com
-  name: test-cluster
-contexts:
-- context:
-    cluster: test-cluster
-    user: test-user
-  name: test-context
-current-context: test-context
-users:
-- name: test-user
-  user:
-    username: test-username
-    password: test-password
-`
-
-		// Create multiple cluster configs
-		for i := 1; i <= 3; i++ {
-			clusterName := path.Join(kubeconfigDir, "cluster"+string(rune('0'+i))+".yaml")
-			if err := os.WriteFile(clusterName, []byte(kubeconfigContent), 0644); err != nil {
-				t.Fatalf("failed to create kubeconfig: %v", err)
-			}
-		}
-
-		staticConfig := &config.StaticConfig{
-			KubeConfigDir: kubeconfigDir,
-		}
-
-		configuration := Configuration{
-			Profile:      ProfileFromString("full"),
-			ListOutput:   output.FromString("table"),
-			StaticConfig: staticConfig,
-		}
-
-		klog.SetLogger(klog.Background())
-
-		server := &Server{
-			configuration: &configuration,
-		}
-
-		// Initialize cluster manager
-		clusterManager, err := kubernetes.NewMultiClusterManager(staticConfig, klog.Background())
-		if err != nil {
-			t.Fatalf("failed to create cluster manager: %v", err)
-		}
-		server.clusterManager = clusterManager
-
-		ctx := context.Background()
-
-		// Create request
-		req := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Name: "clusters_exec_all",
-				Arguments: map[string]interface{}{
-					"operation": "namespaces_list",
-					"arguments": map[string]interface{}{},
-					"continue_on_error": true,
-				},
-			},
-		}
-
-		result, err := server.clustersExecAll(ctx, req)
-
-		// Should not return error at the handler level
-		if err != nil {
-			t.Fatalf("clustersExecAll returned error: %v", err)
-		}
-
-		if result == nil {
-			t.Fatal("Expected non-nil result")
-		}
-
-		if len(result.Content) == 0 {
-			t.Fatal("Expected result content")
-		}
-
-		textContent, ok := result.Content[0].(mcp.TextContent)
-		if !ok {
-			t.Fatal("Expected TextContent in result")
-		}
-
-		output := textContent.Text
-
-		// Verify output contains summary
-		if !strings.Contains(output, "Summary:") {
-			t.Error("Output should contain summary")
-		}
-
-		// Verify it attempted to execute on clusters
-		if !strings.Contains(output, "Executing") {
-			t.Error("Output should mention executing operation")
-		}
-	})
-
-	t.Run("Returns error when operation is missing", func(t *testing.T) {
-		server := &Server{
-			configuration: &Configuration{},
-		}
-
-		ctx := context.Background()
-		req := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Name:      "clusters_exec_all",
-				Arguments: map[string]interface{}{},
-			},
-		}
-
-		result, err := server.clustersExecAll(ctx, req)
-
-		if err != nil {
-			t.Fatalf("Expected error in result, not in return value: %v", err)
-		}
-
-		if result == nil {
-			t.Fatal("Expected non-nil result")
-		}
-
-		textContent, ok := result.Content[0].(mcp.TextContent)
-		if !ok {
-			t.Fatal("Expected TextContent in result")
-		}
-
-		if !result.IsError || textContent.Text == "" {
-			t.Error("Expected error result when operation is missing")
-		}
-	})
-
-	t.Run("Respects continue_on_error flag", func(t *testing.T) {
-		// Setup
-		tempDir := t.TempDir()
-		kubeconfigDir := path.Join(tempDir, "kubeconfigs")
-		if err := os.MkdirAll(kubeconfigDir, 0755); err != nil {
-			t.Fatalf("failed to create kubeconfig directory: %v", err)
-		}
-
-		kubeconfigContent := `
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    server: https://test-cluster.example.com
-  name: test-cluster
-contexts:
-- context:
-    cluster: test-cluster
-    user: test-user
-  name: test-context
-current-context: test-context
-users:
-- name: test-user
-  user:
-    username: test-username
-    password: test-password
-`
-
-		kubeconfigPath := path.Join(kubeconfigDir, "test-cluster.yaml")
-		if err := os.WriteFile(kubeconfigPath, []byte(kubeconfigContent), 0644); err != nil {
-			t.Fatalf("failed to create kubeconfig: %v", err)
-		}
-
-		staticConfig := &config.StaticConfig{
-			KubeConfigDir: kubeconfigDir,
-		}
-
-		configuration := Configuration{
-			Profile:      ProfileFromString("full"),
-			ListOutput:   output.FromString("table"),
-			StaticConfig: staticConfig,
-		}
-
-		klog.SetLogger(klog.Background())
-
-		server := &Server{
-			configuration: &configuration,
-		}
-
-		clusterManager, err := kubernetes.NewMultiClusterManager(staticConfig, klog.Background())
-		if err != nil {
-			t.Fatalf("failed to create cluster manager: %v", err)
-		}
-		server.clusterManager = clusterManager
-
-		ctx := context.Background()
-
-		// Test with continue_on_error = true
-		req := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Name: "clusters_exec_all",
-				Arguments: map[string]interface{}{
-					"operation":         "namespaces_list",
-					"continue_on_error": true,
-				},
-			},
-		}
-
-		result, err := server.clustersExecAll(ctx, req)
-
-		if err != nil {
-			t.Fatalf("clustersExecAll returned error: %v", err)
-		}
-
-		if result == nil {
-			t.Fatal("Expected non-nil result")
-		}
-
-		// Should have completed even with errors
-		textContent, ok := result.Content[0].(mcp.TextContent)
-		if !ok {
-			t.Fatal("Expected TextContent in result")
-		}
-
-		if !strings.Contains(textContent.Text, "Summary:") {
-			t.Error("Should contain summary even with continue_on_error")
-		}
-	})
-
-	t.Run("Targets specific clusters when provided", func(t *testing.T) {
-		// Setup
-		tempDir := t.TempDir()
-		kubeconfigDir := path.Join(tempDir, "kubeconfigs")
-		if err := os.MkdirAll(kubeconfigDir, 0755); err != nil {
-			t.Fatalf("failed to create kubeconfig directory: %v", err)
-		}
-
-		kubeconfigContent := `
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    server: https://test-cluster.example.com
-  name: test-cluster
-contexts:
-- context:
-    cluster: test-cluster
-    user: test-user
-  name: test-context
-current-context: test-context
-users:
-- name: test-user
-  user:
-    username: test-username
-    password: test-password
-`
-
-		// Create multiple clusters
-		for i := 1; i <= 3; i++ {
-			clusterPath := path.Join(kubeconfigDir, "cluster"+string(rune('0'+i))+".yaml")
-			if err := os.WriteFile(clusterPath, []byte(kubeconfigContent), 0644); err != nil {
-				t.Fatalf("failed to create kubeconfig: %v", err)
-			}
-		}
-
-		staticConfig := &config.StaticConfig{
-			KubeConfigDir: kubeconfigDir,
-		}
-
-		configuration := Configuration{
-			Profile:      ProfileFromString("full"),
-			ListOutput:   output.FromString("table"),
-			StaticConfig: staticConfig,
-		}
-
-		klog.SetLogger(klog.Background())
-
-		server := &Server{
-			configuration: &configuration,
-		}
-
-		clusterManager, err := kubernetes.NewMultiClusterManager(staticConfig, klog.Background())
-		if err != nil {
-			t.Fatalf("failed to create cluster manager: %v", err)
-		}
-		server.clusterManager = clusterManager
-
-		ctx := context.Background()
-
-		// Request only specific clusters
-		req := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Name: "clusters_exec_all",
-				Arguments: map[string]interface{}{
-					"operation":         "namespaces_list",
-					"clusters":          []interface{}{"cluster1"},
-					"continue_on_error": true,
-				},
-			},
-		}
-
-		result, err := server.clustersExecAll(ctx, req)
-
-		if err != nil {
-			t.Fatalf("clustersExecAll returned error: %v", err)
-		}
-
-		if result == nil {
-			t.Fatal("Expected non-nil result")
-		}
-
-		textContent, ok := result.Content[0].(mcp.TextContent)
-		if !ok {
-			t.Fatal("Expected TextContent in result")
-		}
-
-		// Should only execute on 1 cluster
-		if !strings.Contains(textContent.Text, "across 1 cluster") {
-			t.Error("Should execute across 1 cluster when specific cluster provided")
-		}
 	})
 }

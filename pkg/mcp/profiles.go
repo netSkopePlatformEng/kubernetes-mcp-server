@@ -39,7 +39,8 @@ func (p *FullProfile) GetTools(s *Server) []server.ServerTool {
 	return slices.Concat(
 		s.initConfiguration(),
 		s.initClusters(),
-		s.initNSK(),
+		s.initRancher(),
+		s.initJobTools(),
 		s.initEvents(),
 		s.initNamespaces(),
 		s.initPods(),

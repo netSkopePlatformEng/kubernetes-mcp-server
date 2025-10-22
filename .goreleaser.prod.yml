@@ -1,0 +1,274 @@
+# GoReleaser configuration for Kubernetes MCP Server
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+# Project settings
+project_name: kubernetes-mcp-server
+
+# Before hooks
+before:
+  hooks:
+    - go mod tidy
+    - go fmt ./...
+
+# Build configuration
+builds:
+  - id: kubernetes-mcp-server
+    main: ./cmd/kubernetes-mcp-server
+    binary: kubernetes-mcp-server
+
+    # Build environment
+    env:
+      - CGO_ENABLED=0
+
+    # Build flags
+    flags:
+      - -trimpath
+      - -mod=readonly
+
+    # Linker flags for version info and optimization
+    ldflags:
+      - -s -w
+      - -X github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/version.Version={{.Version}}
+      - -X github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/version.CommitHash={{.Commit}}
+      - -X github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/version.BuildTime={{.Date}}
+      - -X github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/version.BinaryName={{.ProjectName}}
+
+    # Target platforms
+    goos:
+      - linux
+      - darwin
+      - windows
+
+    goarch:
+      - amd64
+      - arm64
+
+    # Skip certain combinations
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+# Archive configuration
+archives:
+  - id: kubernetes-mcp-server
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+
+    # Files to include
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+      - docs/*
+
+# Checksum configuration
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+# Snapshot configuration (for non-tagged builds)
+snapshot:
+  version_template: "{{ .Tag }}-next-{{ .ShortCommit }}"
+
+# Docker configuration
+dockers:
+  - id: kubernetes-mcp-server
+    image_templates:
+      - "ghcr.io/netskope/{{ .ProjectName }}:{{ .Version }}"
+      - "ghcr.io/netskope/{{ .ProjectName }}:latest"
+
+    dockerfile: Dockerfile
+
+    build_flag_templates:
+      - "--pull"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source=https://github.com/netSkopePlatformEng/kubernetes-mcp-server"
+      - "--platform=linux/amd64,linux/arm64"
+
+    skip_push: auto
+
+# Homebrew tap configuration
+brews:
+  - name: kubernetes-mcp-server
+
+    # GitHub repository for the tap
+    repository:
+      owner: netSkopePlatformEng
+      name: homebrew-tap
+      branch: main
+
+    # Homebrew formula
+    description: "Kubernetes Model Context Protocol (MCP) server for AI agents"
+    homepage: "https://github.com/netSkopePlatformEng/kubernetes-mcp-server"
+    license: "Apache-2.0"
+
+    skip_upload: auto
+
+    test: |
+      system "#{bin}/kubernetes-mcp-server", "--version"
+
+# NFPM configuration for Linux packages
+nfpms:
+  - id: kubernetes-mcp-server
+
+    package_name: kubernetes-mcp-server
+
+    # Package metadata
+    vendor: Netskope
+    homepage: https://github.com/netSkopePlatformEng/kubernetes-mcp-server
+    maintainer: Platform Engineering <platform-eng@netskope.com>
+    description: Kubernetes Model Context Protocol (MCP) server for AI agents
+    license: Apache-2.0
+
+    # Package formats
+    formats:
+      - deb
+      - rpm
+      - apk
+
+    # Dependencies
+    dependencies:
+      - kubectl
+
+    recommends:
+      - helm
+
+# Release configuration
+release:
+  # GitHub release
+  github:
+    owner: netSkopePlatformEng
+    name: kubernetes-mcp-server
+
+  # Release name
+  name_template: "v{{.Version}}"
+
+  # Draft release
+  draft: false
+
+  # Mark as prerelease for non-stable versions
+  prerelease: auto
+
+  # Release notes
+  mode: append
+
+  header: |
+    ## Kubernetes MCP Server v{{.Version}}
+
+    Released on {{ .Date }}
+
+  footer: |
+    ## Docker Images
+
+    ```bash
+    docker pull ghcr.io/netskope/kubernetes-mcp-server:{{ .Version }}
+    ```
+
+    ## Installation
+
+    ### macOS (Homebrew)
+    ```bash
+    brew tap netSkopePlatformEng/tap
+    brew install kubernetes-mcp-server
+    ```
+
+    ### Linux (Binary)
+    ```bash
+    curl -L https://github.com/netSkopePlatformEng/kubernetes-mcp-server/releases/download/{{ .Tag }}/kubernetes-mcp-server_{{ .Version }}_linux_x86_64.tar.gz | tar xz
+    sudo mv kubernetes-mcp-server /usr/local/bin/
+    ```
+
+    ### Windows
+    Download the Windows archive from the releases page and extract to a directory in your PATH.
+
+    ## Full Changelog
+    https://github.com/netSkopePlatformEng/kubernetes-mcp-server/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+# Changelog configuration
+changelog:
+  sort: asc
+  use: github
+
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+
+  groups:
+    - title: '🚀 Features'
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: '🐛 Bug Fixes'
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: '⚡ Performance'
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: '♻️ Refactoring'
+      regexp: '^.*?refactor(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: '📦 Dependencies'
+      regexp: '^.*?deps(\([[:word:]]+\))??!?:.+$'
+      order: 4
+    - title: 'Other Changes'
+      order: 999
+
+# Announce configuration
+announce:
+  skip: auto
+
+  discord:
+    enabled: false
+    message_template: |
+      **{{ .ProjectName }} {{ .Tag }}** has been released!
+      Check it out at {{ .ReleaseURL }}
+
+  slack:
+    enabled: false
+    message_template: |
+      *{{ .ProjectName }} {{ .Tag }}* has been released!
+      Check it out at {{ .ReleaseURL }}
+
+# SBOM generation
+sboms:
+  - artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.json"
+    cmd: syft
+    args:
+      - "${artifact}"
+      - --output
+      - json
+      - --file
+      - "${document}"
+    env:
+      - SYFT_QUIET=true
+
+# Sign configuration
+signs:
+  - cmd: cosign
+    signature: '${artifact}.sig'
+    certificate: '${artifact}.pem'
+    output: true
+    artifacts: checksum
+    args:
+      - sign-blob
+      - '--output-signature=${signature}'
+      - '--output-certificate=${certificate}'
+      - '${artifact}'
+      - --yes
