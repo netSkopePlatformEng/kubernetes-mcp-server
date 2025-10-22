@@ -36,3 +36,10 @@ coverage.out
 coverage.html
 debug-*.go
 .claude/settings.local.json
+
+# Rancher configuration files (may contain tokens)
+rancher-config.toml
+rancher-config.*.toml
+
+# Test executables
+cmd/test-rancher/

@@ -1,16 +1,16 @@
 # Kubernetes MCP Server Configuration with Rancher Integration
 
 # Multi-cluster support - where to store downloaded kubeconfig files
-kubeconfig_dir = "/Users/jdambly/.mcp"
+kubeconfig_dir = "/path/to/.mcp"
 auto_discovery = true
 
 # Rancher Integration - direct API access
 [rancher]
 enabled = true
-url = "https://rancher.prime.iad0.netskope.com"
-token = "token-64l2k:dfnjc76lcgthfn8s4wlzqmpjsvfljvxtgvqb2224z2bmkzsrx4qszx"
-insecure = true
-config_dir = "/Users/jdambly/.mcp"
+url = "https://rancher.example.com"
+token = "token-xxxxx:your-rancher-api-token-here"
+insecure = false
+config_dir = "/path/to/.mcp"
 
 # Optional: Auto-refresh clusters periodically
 # auto_refresh = true
