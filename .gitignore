@@ -29,9 +29,7 @@ python/kubernetes_mcp_server.egg-info/
 !python/kubernetes-mcp-server
 
 # Test binaries and output
-test-fresh-switching
-test-*.go
-test-*.sh
+test-*
 coverage.out
 coverage.html
 debug-*.go
