@@ -27,7 +27,8 @@
       "Bash(make test:*)",
       "mcp__k8s__get_job_status",
       "mcp__k8s__get_job_results",
-      "mcp__k8s__clusters_switch"
+      "mcp__k8s__clusters_switch",
+      "Read(//Volumes/Case-sensitive/repos/containernetworking/.github/workflows/**)"
     ],
     "deny": [],
     "ask": [],

@@ -14,8 +14,9 @@ This is a fork of the Kubernetes MCP Server project, extended to support Rancher
 - **mark3labs/mcp-go** - Go implementation of MCP protocol
 
 ### Version Requirements
-- **Target Kubernetes Version**: v1.24.17
-- **Note**: Current go.mod uses k8s.io/* v0.34.0 dependencies, but should be downgraded to match v1.24.17 cluster compatibility
+- **Go Version**: 1.24.1
+- **Kubernetes client-go**: v0.34.0 (compatible with Kubernetes v1.24+)
+- **MCP Protocol**: v1.0.0
 
 ### Rancher Integration Context
 Rancher integration provides direct API access to download kubeconfig files for multiple clusters. Key concepts:
@@ -103,50 +104,58 @@ npx @modelcontextprotocol/inspector@latest $(pwd)/kubernetes-mcp-server
 - **Access Control** - Read-only mode, destructive operation controls
 - **Multi-cluster Ready** - Kubeconfig file specification support
 
-## Planned Multi-Cluster Extension
+## Multi-Cluster Extension (Implemented in v1.0.0)
 
-### Target Architecture for Rancher Integration
+### Rancher Integration Features
 
-The planned extension should:
+The multi-cluster extension is now complete and production-ready:
 
-1. **Directory-based Kubeconfig Loading**
-   - Read multiple kubeconfig files from a specified directory
-   - Maintain a mapping of cluster names to kubeconfig file paths
-   - Add new MCP tools for cluster discovery and switching
+1. **Directory-based Kubeconfig Loading** ✅
+   - Reads multiple kubeconfig files from `--kubeconfig-dir` directory
+   - Maintains isolated client managers for each cluster
+   - Auto-discovers clusters from YAML files in the directory
 
-2. **Cluster Context Management**
-   - Add tools to list available clusters
-   - Implement cluster switching via isolated client managers per cluster
-   - Enable cross-cluster operations (run same command on all clusters)
+2. **Cluster Context Management** ✅
+   - Dynamic cluster switching without server restart
+   - Isolated Kubernetes client managers per cluster
+   - Thread-safe cluster state management
 
-3. **Enhanced MCP Tools**
+3. **Multi-Cluster MCP Tools** ✅
    - `clusters_list` - List all available cluster configurations
    - `clusters_switch` - Switch active cluster context
-   - `clusters_exec_all` - Execute operation across all clusters
-   - Extend existing tools with cluster selection parameters
+   - `clusters_status` - Check connectivity and health of clusters
+   - `clusters_refresh` - Refresh cluster list from directory
+   - `start_clusters_exec` - Execute operations across multiple clusters asynchronously
+   - Job management tools for async operations (`get_job_status`, `get_job_results`, `cancel_job`)
 
-### Integration Points
+4. **Rancher API Integration** ✅
+   - Direct Rancher API integration for kubeconfig download
+   - `rancher_list_clusters` - List all clusters in Rancher
+   - `rancher_download_cluster` - Download specific cluster kubeconfig
+   - `rancher_download_all` - Batch download all cluster kubeconfigs (async)
+   - `rancher_status` - Check Rancher cluster health
+   - `rancher_integration_status` - View Rancher configuration
 
-Key files to modify for multi-cluster support:
-- `pkg/kubernetes/configuration.go` - Extend kubeconfig loading logic
-- `pkg/mcp/` - Add new cluster management tools
-- `pkg/kubernetes-mcp-server/cmd/root.go` - Add kubeconfig directory flag
-- Configuration system to support directory-based cluster discovery
-
-### Rancher Integration Notes
-- Rancher integration generates individual kubeconfig files per cluster
-- File naming pattern: `{cluster-name}.yaml` (e.g., `c1-am2.yaml`)
-- Supports multiple Rancher environments via configuration
-- Periodic refresh of kubeconfig files for token rotation
+### Key Implementation Files
+- `pkg/kubernetes/configuration.go` - Multi-cluster kubeconfig loading
+- `pkg/mcp/clusters.go` - Cluster management MCP tools
+- `pkg/mcp/clusters_exec.go` - Cross-cluster execution engine with job system
+- `pkg/mcp/rancher.go` - Rancher API integration
+- `pkg/rancher/` - Rancher client library
+- `pkg/jobs/` - Asynchronous job management system
+- `pkg/kubernetes-mcp-server/cmd/root.go` - CLI flags for multi-cluster mode
 
 ## Configuration Patterns
 
 ### Command Line Flags
-- `--kubeconfig` - Single kubeconfig file (current behavior)
-- `--kubeconfig-dir` - Directory containing multiple kubeconfig files (planned)
+- `--kubeconfig` - Single kubeconfig file path
+- `--kubeconfig-dir` - Directory containing multiple kubeconfig files (enables multi-cluster mode)
 - `--profile` - MCP profile selection (full, basic, read-only)
 - `--read-only` - Restrict to read operations only
 - `--port` - HTTP/SSE server mode
+- `--rancher-url` - Rancher server URL for API integration
+- `--rancher-token` - Rancher API token for authentication
+- `--rancher-cluster-id` - Rancher cluster ID filter
 
 ### Environment Variables
 - Standard Kubernetes environment variables supported for cluster authentication

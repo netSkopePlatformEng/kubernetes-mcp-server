@@ -1,153 +1,17 @@
-name: Release
-
+name: release
 on:
   push:
-    tags:
-      - 'v*'
-
-concurrency:
-  # Only run once for latest commit per ref and cancel other (previous) runs.
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  GO_VERSION: 1.23
-  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-  UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
-
-permissions:
-  contents: write
-  packages: write
-  discussions: write
-  id-token: write
-
+    tags: [ 'v*' ]
 jobs:
-  goreleaser:
-    name: Release with GoReleaser
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Install Syft (for SBOM generation)
-        uses: anchore/sbom-action/download-syft@v0
-
-      - name: Install Cosign (for signing)
-        uses: sigstore/cosign-installer@v3
-        if: ${{ github.event_name != 'pull_request' }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: latest
-          args: release --clean --config .goreleaser.prod.yml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-
-  npm-publish:
-    name: Publish to NPM
-    needs: goreleaser
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform:
-          - os: darwin
-            arch: amd64
-          - os: darwin
-            arch: arm64
-          - os: linux
-            arch: amd64
-          - os: linux
-            arch: arm64
-          - os: windows
-            arch: amd64
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: robinraju/release-downloader@v1
-        with:
-          repository: "netSkopePlatformEng/kubernetes-mcp-server"
-          tag: ${{ github.ref_name }}
-          fileName: "kubernetes-mcp-server_*_${{ matrix.platform.os }}_${{ matrix.platform.arch == 'amd64' && 'x86_64' || matrix.platform.arch }}.tar.gz"
-          out-file-path: "dist"
-
-      - name: Extract binary
-        run: |
-          cd dist
-          tar -xzf kubernetes-mcp-server_*_${{ matrix.platform.os }}_*.tar.gz
-          cd ..
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Publish platform package
-        run: |
-          DIRNAME="kubernetes-mcp-server-${{ matrix.platform.os }}-${{ matrix.platform.arch }}"
-          mkdir -p npm/$DIRNAME/bin
-          cp dist/kubernetes-mcp-server* npm/$DIRNAME/bin/
-          cd npm/$DIRNAME
-          npm version ${{ github.ref_name }} --no-git-tag-version
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  npm-publish-main:
-    name: Publish main NPM package
-    needs: npm-publish
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Publish main package
-        run: |
-          cp README.md LICENSE npm/kubernetes-mcp-server/
-          cd npm/kubernetes-mcp-server
-          npm version ${{ github.ref_name }} --no-git-tag-version
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  python:
-    name: Release Python
-    needs: goreleaser
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
-
-      - name: Publish Python
-        run: make python-publish
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
+  release:
+    uses: netSkopePlatformEng/reusable-gh-actions/.github/workflows/go-release.yaml@main
+    with:
+      create-git-tag: false
+      docker-repository: "pe-docker/kubernetes-mcp-server"
+      notification_emails: jdambly@netskope.com
+      release-china: true
+      runs-on: "pe-org"
+      upload-debs-commercial: false
+      upload-debs-fedramp: false
+      version-base: v1.0
+    secrets: inherit

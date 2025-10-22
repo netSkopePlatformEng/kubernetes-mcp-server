@@ -167,3 +167,63 @@ golangci-lint: ## Download and install golangci-lint if not already installed
 .PHONY: lint
 lint: golangci-lint ## Lint the code
 	$(GOLANGCI_LINT) run --verbose --print-resources-usage
+
+##@ Docker
+
+.PHONY: docker-build
+docker-build: ## Build Docker image
+	docker build -t kubernetes-mcp-server:latest .
+
+.PHONY: docker-run
+docker-run: ## Run Docker container with kubeconfig directory mounted
+	docker run -d \
+		--name kubernetes-mcp-server \
+		-p 8080:8080 \
+		-v $(HOME)/.mcp:/mcp:ro \
+		kubernetes-mcp-server:latest \
+		--port=8080 \
+		--kubeconfig-dir=/mcp
+
+.PHONY: docker-run-rancher
+docker-run-rancher: ## Run Docker container with Rancher integration
+	docker run -d \
+		--name kubernetes-mcp-server \
+		-p 8080:8080 \
+		-v $(HOME)/.mcp:/mcp:ro \
+		-e RANCHER_URL=$(RANCHER_URL) \
+		-e RANCHER_TOKEN=$(RANCHER_TOKEN) \
+		kubernetes-mcp-server:latest \
+		--port=8080 \
+		--kubeconfig-dir=/mcp \
+		--rancher-url=$(RANCHER_URL) \
+		--rancher-token=$(RANCHER_TOKEN)
+
+.PHONY: docker-stop
+docker-stop: ## Stop and remove Docker container
+	docker stop kubernetes-mcp-server || true
+	docker rm kubernetes-mcp-server || true
+
+.PHONY: docker-logs
+docker-logs: ## Show Docker container logs
+	docker logs -f kubernetes-mcp-server
+
+.PHONY: docker-shell
+docker-shell: ## Open shell in running container
+	docker exec -it kubernetes-mcp-server /bin/sh
+
+.PHONY: compose-up
+compose-up: ## Start services with docker-compose
+	docker-compose up -d
+
+.PHONY: compose-down
+compose-down: ## Stop services with docker-compose
+	docker-compose down
+
+.PHONY: compose-logs
+compose-logs: ## Show docker-compose logs
+	docker-compose logs -f
+
+.PHONY: compose-rebuild
+compose-rebuild: ## Rebuild and restart with docker-compose
+	docker-compose down
+	docker-compose up -d --build

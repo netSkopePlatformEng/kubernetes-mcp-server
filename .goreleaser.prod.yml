@@ -77,25 +77,9 @@ checksum:
 snapshot:
   version_template: "{{ .Tag }}-next-{{ .ShortCommit }}"
 
-# Docker configuration
-dockers:
-  - id: kubernetes-mcp-server
-    image_templates:
-      - "ghcr.io/netskope/{{ .ProjectName }}:{{ .Version }}"
-      - "ghcr.io/netskope/{{ .ProjectName }}:latest"
-
-    dockerfile: Dockerfile
-
-    build_flag_templates:
-      - "--pull"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source=https://github.com/netSkopePlatformEng/kubernetes-mcp-server"
-      - "--platform=linux/amd64,linux/arm64"
-
-    skip_push: auto
+# Docker configuration is handled by the reusable GitHub Actions workflow
+# Images are pushed to Netskope Artifactory:
+#   - artifactory.netskope.io/pe-docker/kubernetes-mcp-server (commercial only)
 
 # Homebrew tap configuration
 brews:
@@ -168,10 +152,10 @@ release:
     Released on {{ .Date }}
 
   footer: |
-    ## Docker Images
+    ## Docker Images (Netskope Artifactory)
 
     ```bash
-    docker pull ghcr.io/netskope/kubernetes-mcp-server:{{ .Version }}
+    docker pull artifactory.netskope.io/pe-docker/kubernetes-mcp-server:{{ .Version }}
     ```
 
     ## Installation
