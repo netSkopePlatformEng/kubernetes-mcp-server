@@ -35,3 +35,4 @@ test-*.sh
 coverage.out
 coverage.html
 debug-*.go
+.claude/settings.local.json
