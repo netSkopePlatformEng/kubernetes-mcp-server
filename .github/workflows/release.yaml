@@ -7,7 +7,7 @@ jobs:
     uses: netSkopePlatformEng/reusable-gh-actions/.github/workflows/go-release.yaml@main
     with:
       create-git-tag: false
-      docker-repository: "pe-docker/kubernetes-mcp-server"
+      docker-repository: "pe-sys-docker/kubernetes-mcp-server"
       notification_emails: jdambly@netskope.com
       release-china: true
       runs-on: "pe-org"

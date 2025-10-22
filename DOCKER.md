@@ -174,8 +174,8 @@ make compose-rebuild
 The release process automatically builds and publishes Docker images to Netskope Artifactory:
 
 ```bash
-docker pull artifactory.netskope.io/pe-docker/kubernetes-mcp-server:v1.0.0
-docker pull artifactory.netskope.io/pe-docker/kubernetes-mcp-server:latest
+docker pull artifactory.netskope.io/pe-sys-docker/kubernetes-mcp-server:v1.0.0
+docker pull artifactory.netskope.io/pe-sys-docker/kubernetes-mcp-server:latest
 ```
 
 Run the published image:
@@ -185,7 +185,7 @@ docker run -d \
   --name kubernetes-mcp-server \
   -p 8080:8080 \
   -v ~/.mcp:/mcp:ro \
-  artifactory.netskope.io/pe-docker/kubernetes-mcp-server:latest \
+  artifactory.netskope.io/pe-sys-docker/kubernetes-mcp-server:latest \
   --port=8080 \
   --kubeconfig-dir=/mcp
 ```
@@ -217,7 +217,7 @@ spec:
     spec:
       containers:
       - name: kubernetes-mcp-server
-        image: artifactory.netskope.io/pe-docker/kubernetes-mcp-server:latest
+        image: artifactory.netskope.io/pe-sys-docker/kubernetes-mcp-server:latest
         ports:
         - containerPort: 8080
           name: http
