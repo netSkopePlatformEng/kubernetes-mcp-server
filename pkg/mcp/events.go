@@ -30,10 +30,11 @@ func (s *Server) eventsList(ctx context.Context, ctr mcp.CallToolRequest) (*mcp.
 	if namespace == nil {
 		namespace = ""
 	}
-	derived, err := s.k.Derived(ctx)
+	derived, cleanup, err := s.getFreshDerived(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	eventMap, err := derived.EventsList(ctx, namespace.(string))
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to list events in all namespaces: %v", err)), nil

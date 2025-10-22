@@ -15,12 +15,12 @@ import (
 type RancherDownloadExecutor struct {
 	rancher    *kubernetes.RancherIntegration
 	configDir  string
-	clusterMgr *kubernetes.MultiClusterManager
+	clusterMgr interface{ RefreshClusters(context.Context) error } // Accept any cluster manager with RefreshClusters
 	logger     klog.Logger
 }
 
 // NewRancherDownloadExecutor creates a new Rancher download executor
-func NewRancherDownloadExecutor(rancher *kubernetes.RancherIntegration, configDir string, clusterMgr *kubernetes.MultiClusterManager) *RancherDownloadExecutor {
+func NewRancherDownloadExecutor(rancher *kubernetes.RancherIntegration, configDir string, clusterMgr interface{ RefreshClusters(context.Context) error }) *RancherDownloadExecutor {
 	return &RancherDownloadExecutor{
 		rancher:    rancher,
 		configDir:  configDir,

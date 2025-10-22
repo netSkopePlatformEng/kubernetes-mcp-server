@@ -17,21 +17,26 @@ import (
 type RancherIntegration struct {
 	config         *config.RancherConfig
 	client         *rancher.Client
-	clusterManager *MultiClusterManager
+	clusterManager interface{ RefreshClusters(context.Context) error } // Accept any cluster manager with RefreshClusters
+	manager        *rancher.Manager
 	logger         klog.Logger
 	mu             sync.RWMutex
 	lastRefresh    time.Time
 }
 
 // NewRancherIntegration creates a new Rancher integration
-func NewRancherIntegration(cfg *config.RancherConfig, mcm *MultiClusterManager) *RancherIntegration {
+func NewRancherIntegration(cfg *config.RancherConfig, clusterManager interface{ RefreshClusters(context.Context) error }, logger klog.Logger) *RancherIntegration {
 	client := rancher.NewClient(cfg.URL, cfg.Token, cfg.Insecure)
+
+	// Create the rancher manager
+	manager := rancher.NewManager(cfg, logger)
 
 	return &RancherIntegration{
 		config:         cfg,
 		client:         client,
-		clusterManager: mcm,
-		logger:         klog.Background(),
+		clusterManager: clusterManager,
+		manager:        manager,
+		logger:         logger,
 	}
 }
 
@@ -141,8 +146,36 @@ func (r *RancherIntegration) GetLastRefreshTime() time.Time {
 	return r.lastRefresh
 }
 
+// GetClustersWithStatus returns clusters with their current status from Rancher
+func (r *RancherIntegration) GetClustersWithStatus(ctx context.Context) ([]map[string]string, error) {
+	if r.manager != nil {
+		return r.manager.GetClustersWithStatus(ctx)
+	}
+
+	// Fallback to basic implementation
+	clusters, err := r.client.ListClusters()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list clusters: %w", err)
+	}
+
+	result := make([]map[string]string, 0, len(clusters))
+	for _, cluster := range clusters {
+		result = append(result, map[string]string{
+			"name":  cluster.Name,
+			"id":    cluster.ID,
+			"state": cluster.State,
+		})
+	}
+
+	return result, nil
+}
+
 // GetStatus returns the current Rancher integration status
 func (r *RancherIntegration) GetStatus() map[string]interface{} {
+	if r.manager != nil {
+		return r.manager.GetStatus()
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -151,25 +184,6 @@ func (r *RancherIntegration) GetStatus() map[string]interface{} {
 		"rancher_url":   r.config.URL,
 		"config_dir":    r.config.ConfigDir,
 		"last_refresh":  r.lastRefresh,
-		"cluster_count": len(r.clusterManager.ListClusters()),
+		"cluster_count": 0, // Updated through manager
 	}
-}
-
-// GetClustersWithStatus returns all clusters with their current status from Rancher
-func (r *RancherIntegration) GetClustersWithStatus(ctx context.Context) ([]map[string]string, error) {
-	clusters, err := r.client.ListClusters()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list clusters from Rancher: %w", err)
-	}
-
-	result := make([]map[string]string, 0, len(clusters))
-	for _, cluster := range clusters {
-		result = append(result, map[string]string{
-			"id":    cluster.ID,
-			"name":  cluster.Name,
-			"state": cluster.State,
-		})
-	}
-
-	return result, nil
 }

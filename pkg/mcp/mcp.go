@@ -115,13 +115,16 @@ func (s *Server) initializeMultiCluster() error {
 	s.clusterManager = mcm
 
 	// Initialize Rancher integration if configured
-	// TODO: Update RancherIntegration to work with SimpleMultiClusterManager
-	// if s.configuration.StaticConfig.IsRancherEnabled() {
-	//	s.rancher = internalk8s.NewRancherIntegration(s.configuration.StaticConfig.RancherIntegration, s.clusterManager)
-	//	logger.Info("Rancher integration initialized",
-	//		"url", s.configuration.StaticConfig.RancherIntegration.URL,
-	//		"config_dir", s.configuration.StaticConfig.RancherIntegration.ConfigDir)
-	// }
+	if s.configuration.StaticConfig.IsRancherEnabled() {
+		s.rancher = internalk8s.NewRancherIntegration(
+			s.configuration.StaticConfig.RancherIntegration,
+			s.clusterManager,
+			logger,
+		)
+		logger.Info("Rancher integration initialized",
+			"url", s.configuration.StaticConfig.RancherIntegration.URL,
+			"config_dir", s.configuration.StaticConfig.RancherIntegration.ConfigDir)
+	}
 
 	// Start the multi-cluster manager
 	ctx := context.Background()
@@ -307,6 +310,45 @@ func (s *Server) Close() {
 	} else if s.k != nil {
 		s.k.Close()
 	}
+}
+
+// getFreshDerived gets a fresh derived Kubernetes client for the active cluster.
+// In multi-cluster mode, this ensures we always use the correct cluster's manager.
+// The cleanup function MUST be called when done to avoid resource leaks.
+func (s *Server) getFreshDerived(ctx context.Context) (*internalk8s.Kubernetes, func(), error) {
+	// Multi-cluster mode: get fresh manager for active cluster
+	if s.k8s != nil {
+		manager, err := s.k8s.GetManager()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get manager for active cluster: %w", err)
+		}
+
+		derived, err := manager.Derived(ctx)
+		if err != nil {
+			manager.Close()
+			return nil, nil, fmt.Errorf("failed to get derived client: %w", err)
+		}
+
+		// Return cleanup function that closes the manager
+		cleanup := func() {
+			manager.Close()
+		}
+
+		return derived, cleanup, nil
+	}
+
+	// Single-cluster mode: use cached manager (no cleanup needed)
+	if s.k == nil {
+		return nil, nil, fmt.Errorf("kubernetes manager is not initialized")
+	}
+
+	derived, err := s.k.Derived(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get derived client: %w", err)
+	}
+
+	// No cleanup needed for cached manager
+	return derived, func() {}, nil
 }
 
 func NewTextResult(content string, err error) *mcp.CallToolResult {

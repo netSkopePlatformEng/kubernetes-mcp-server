@@ -24,7 +24,10 @@
       "Bash(go list:*)",
       "Read(//Volumes/Case-sensitive/repos/nsk/**)",
       "Bash(git tag:*)",
-      "Bash(make test:*)"
+      "Bash(make test:*)",
+      "mcp__k8s__get_job_status",
+      "mcp__k8s__get_job_results",
+      "mcp__k8s__clusters_switch"
     ],
     "deny": [],
     "ask": [],

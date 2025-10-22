@@ -12,14 +12,10 @@ import (
 
 // initRancher initializes Rancher-specific tools
 func (s *Server) initRancher() []server.ServerTool {
-	// TODO: Update Rancher integration to work with SimpleMultiClusterManager
-	// Temporarily disabled while using simplified multi-cluster manager
-	return []server.ServerTool{}
-
 	// Only return Rancher tools if Rancher integration is enabled
-	// if s.rancher == nil {
-	//	return []server.ServerTool{}
-	// }
+	if s.rancher == nil {
+		return []server.ServerTool{}
+	}
 
 	return []server.ServerTool{
 		{Tool: mcp.NewTool("rancher_list_clusters",
@@ -126,12 +122,10 @@ func (s *Server) rancherDownloadAllAsync(ctx context.Context, req mcp.CallToolRe
 
 	// Start job if newly created
 	if created {
-		// TODO: Update to work with SimpleMultiClusterManager
-		// executor := jobs.NewRancherDownloadExecutor(s.rancher, configDir, s.clusterManager)
-		// if err := s.jobManager.StartJob(job.ID, executor); err != nil {
-		//	return NewTextResult("", fmt.Errorf("failed to start job: %w", err)), nil
-		// }
-		return NewTextResult("", fmt.Errorf("rancher integration temporarily disabled")), nil
+		executor := jobs.NewRancherDownloadExecutor(s.rancher, configDir, s.clusterManager)
+		if err := s.jobManager.StartJob(job.ID, executor); err != nil {
+			return NewTextResult("", fmt.Errorf("failed to start job: %w", err)), nil
+		}
 	}
 
 	message := "created"

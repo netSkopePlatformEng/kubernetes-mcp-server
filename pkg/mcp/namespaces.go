@@ -39,10 +39,11 @@ func (s *Server) initNamespaces() []server.ServerTool {
 }
 
 func (s *Server) namespacesList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	derived, err := s.k.Derived(ctx)
+	derived, cleanup, err := s.getFreshDerived(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	ret, err := derived.NamespacesList(ctx, kubernetes.ResourceListOptions{AsTable: s.configuration.ListOutput.AsTable()})
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to list namespaces: %v", err)), nil
@@ -51,10 +52,11 @@ func (s *Server) namespacesList(ctx context.Context, _ mcp.CallToolRequest) (*mc
 }
 
 func (s *Server) projectsList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	derived, err := s.k.Derived(ctx)
+	derived, cleanup, err := s.getFreshDerived(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	ret, err := derived.ProjectsList(ctx, kubernetes.ResourceListOptions{AsTable: s.configuration.ListOutput.AsTable()})
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to list projects: %v", err)), nil
