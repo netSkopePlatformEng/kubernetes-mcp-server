@@ -41,3 +41,4 @@ rancher-config.*.toml
 
 # Test executables
 cmd/test-rancher/
+dist
