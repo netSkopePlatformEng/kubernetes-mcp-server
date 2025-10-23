@@ -261,28 +261,19 @@ func (s *Server) validateManagerAuthentication(manager *internalk8s.Manager, clu
 	return nil
 }
 
-// validateManagerAuthentication performs a basic authentication check for the manager
-func (s *Server) validateManagerAuthentication(manager *internalk8s.Manager, clusterName string) error {
-	logger := klog.Background()
-
-	// Try to get a discovery client and perform a simple API call
-	discoveryClient, err := manager.ToDiscoveryClient()
-	if err != nil {
-		logger.V(3).Info("Failed to get discovery client", "cluster", clusterName, "error", err)
-		return fmt.Errorf("failed to get discovery client: %w", err)
+// getManager returns the current active Manager instance
+// In multi-cluster mode, this always gets the latest active cluster's manager
+// In single-cluster mode, this returns the cached manager
+func (s *Server) getManager() (*internalk8s.Manager, error) {
+	if s.configuration.StaticConfig.IsMultiClusterEnabled() && s.k8s != nil {
+		// Always get the current active manager from k8s to ensure we have the right cluster
+		return s.k8s.GetManager()
 	}
-
-	// Perform a basic server version check to validate authentication
-	serverVersion, err := discoveryClient.ServerVersion()
-	if err != nil {
-		logger.V(3).Info("Server version check failed", "cluster", clusterName, "error", err)
-		return fmt.Errorf("server version check failed: %w", err)
+	// Fall back to cached manager for single-cluster mode
+	if s.k == nil {
+		return nil, fmt.Errorf("kubernetes manager not initialized")
 	}
-
-	logger.V(3).Info("Authentication validation successful", "cluster", clusterName,
-		"server_version", serverVersion.String())
-
-	return nil
+	return s.k, nil
 }
 
 func (s *Server) ServeStdio() error {
@@ -310,18 +301,20 @@ func (s *Server) ServeHTTP(httpServer *http.Server) *server.StreamableHTTPServer
 // KubernetesApiVerifyToken verifies the given token with the audience by
 // sending an TokenReview request to API Server.
 func (s *Server) KubernetesApiVerifyToken(ctx context.Context, token string, audience string) (*authenticationapiv1.UserInfo, []string, error) {
-	if s.k == nil {
-		return nil, nil, fmt.Errorf("kubernetes manager is not initialized")
+	k, err := s.getManager()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get kubernetes manager: %w", err)
 	}
-	return s.k.VerifyToken(ctx, token, audience)
+	return k.VerifyToken(ctx, token, audience)
 }
 
 // GetKubernetesAPIServerHost returns the Kubernetes API server host from the configuration.
 func (s *Server) GetKubernetesAPIServerHost() string {
-	if s.k == nil {
+	k, err := s.getManager()
+	if err != nil {
 		return ""
 	}
-	return s.k.GetAPIServerHost()
+	return k.GetAPIServerHost()
 }
 
 func (s *Server) GetEnabledTools() []string {

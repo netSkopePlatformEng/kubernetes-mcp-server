@@ -369,12 +369,6 @@ func (mcm *MultiClusterManager) SwitchCluster(clusterName string) error {
 		mcm.logger.Error(err, "Cluster validation failed", "cluster", clusterName)
 		return fmt.Errorf("cluster %s is not reachable: %w", clusterName, err)
 	}
-	if manager.staticConfig.KubeConfig == "" {
-		return fmt.Errorf("cluster %s manager has no kubeconfig path", clusterName)
-	}
-
-	// Store previous cluster for logging
-	previousCluster := mcm.activeCluster
 
 	// Switch to the new cluster - each manager is pre-configured with its own kubeconfig
 	mcm.activeCluster = clusterName

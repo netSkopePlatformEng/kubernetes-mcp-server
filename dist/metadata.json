@@ -1,1 +1,1 @@
-{"project_name":"kubernetes-mcp-server","tag":"v0.0.50","previous_tag":"v0.0.49","version":"v0.0.50-next-e51cf28","commit":"e51cf28302bea0b868a5b53fef16c6fba8fca9cb","date":"2025-10-22T10:57:59.181769-07:00","runtime":{"goos":"darwin","goarch":"arm64"}}
+{"project_name":"kubernetes-mcp-server","tag":"v0.0.49","previous_tag":"v0.0.48","version":"v0.0.49-next-bde893f","commit":"bde893fce5642f98c8daaf6d61ec67c5236ab7ec","date":"2025-10-23T14:45:39.821923-07:00","runtime":{"goos":"darwin","goarch":"arm64"}}
