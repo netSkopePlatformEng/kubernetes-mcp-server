@@ -28,6 +28,9 @@ python/dist/
 python/kubernetes_mcp_server.egg-info/
 !python/kubernetes-mcp-server
 
+# Build artifacts from GoReleaser
+dist/
+
 # Test binaries and output
 test-*
 coverage.out
