@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -21,8 +22,8 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/klog/v2"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
-	"github.com/containers/kubernetes-mcp-server/pkg/helm"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/helm"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
 )
@@ -39,8 +40,10 @@ const (
 type CloseWatchKubeConfig func() error
 
 type Kubernetes struct {
-	manager             *Manager
-	multiClusterManager *MultiClusterManager
+	manager                   *Manager
+	multiClusterManager       *MultiClusterManager
+	simpleMultiClusterManager *SimpleMultiClusterManager
+	freshMultiClusterManager  *FreshMultiClusterManager
 }
 
 type Manager struct {
@@ -58,6 +61,8 @@ type Manager struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	cleanupFuncs []func() error
+	closed       bool
+	closedMu     sync.Mutex
 }
 
 var Scheme = scheme.Scheme
@@ -73,6 +78,14 @@ func NewManager(config *config.StaticConfig) (*Manager, error) {
 		cancel:       cancel,
 		cleanupFuncs: make([]func() error, 0),
 	}
+
+	// Log the kubeconfig being used
+	if config.KubeConfig != "" {
+		klog.V(2).Infof("Creating manager with kubeconfig: %s", config.KubeConfig)
+	} else {
+		klog.V(2).Info("Creating manager with default kubeconfig or in-cluster config")
+	}
+
 	if err := resolveKubernetesConfigurations(k8s); err != nil {
 		return nil, err
 	}
@@ -94,6 +107,20 @@ func NewManager(config *config.StaticConfig) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Log authentication status for debugging
+	if k8s.cfg != nil {
+		if k8s.cfg.BearerToken == "" && k8s.cfg.BearerTokenFile == "" &&
+			k8s.cfg.Username == "" && k8s.cfg.Password == "" &&
+			k8s.cfg.CertFile == "" && k8s.cfg.KeyFile == "" &&
+			len(k8s.cfg.CertData) == 0 && len(k8s.cfg.KeyData) == 0 &&
+			k8s.cfg.ExecProvider == nil && k8s.cfg.AuthProvider == nil {
+			klog.V(1).Infof("Manager created with no authentication for server: %s", k8s.cfg.Host)
+		} else {
+			klog.V(3).Infof("Manager created with authentication for server: %s", k8s.cfg.Host)
+		}
+	}
+
 	return k8s, nil
 }
 
@@ -126,14 +153,41 @@ func NewKubernetes(config *config.StaticConfig, logger klog.Logger) (*Kubernetes
 	return k8s, nil
 }
 
+// NewKubernetesWithMultiClusterManager creates a new Kubernetes instance using an existing MultiClusterManager
+func NewKubernetesWithMultiClusterManager(mcm *MultiClusterManager) *Kubernetes {
+	return &Kubernetes{
+		multiClusterManager: mcm,
+	}
+}
+
+// NewKubernetesWithSimpleMultiClusterManager creates a new Kubernetes instance using an existing SimpleMultiClusterManager
+func NewKubernetesWithSimpleMultiClusterManager(mcm *SimpleMultiClusterManager) *Kubernetes {
+	return &Kubernetes{
+		simpleMultiClusterManager: mcm,
+	}
+}
+
+// NewKubernetesWithFreshMultiClusterManager creates a new Kubernetes instance using an existing FreshMultiClusterManager
+func NewKubernetesWithFreshMultiClusterManager(mcm *FreshMultiClusterManager) *Kubernetes {
+	return &Kubernetes{
+		freshMultiClusterManager: mcm,
+	}
+}
+
 // IsMultiCluster returns true if this Kubernetes instance is in multi-cluster mode
 func (k *Kubernetes) IsMultiCluster() bool {
-	return k.multiClusterManager != nil
+	return k.multiClusterManager != nil || k.simpleMultiClusterManager != nil || k.freshMultiClusterManager != nil
 }
 
 // GetManager returns the appropriate manager for the current context
 func (k *Kubernetes) GetManager() (*Manager, error) {
-	if k.IsMultiCluster() {
+	if k.freshMultiClusterManager != nil {
+		return k.freshMultiClusterManager.GetActiveManager()
+	}
+	if k.simpleMultiClusterManager != nil {
+		return k.simpleMultiClusterManager.GetActiveManager()
+	}
+	if k.multiClusterManager != nil {
 		return k.multiClusterManager.GetActiveManager()
 	}
 	return k.manager, nil
@@ -141,34 +195,84 @@ func (k *Kubernetes) GetManager() (*Manager, error) {
 
 // GetManagerForCluster returns the manager for a specific cluster (multi-cluster mode only)
 func (k *Kubernetes) GetManagerForCluster(clusterName string) (*Manager, error) {
-	if !k.IsMultiCluster() {
-		return nil, fmt.Errorf("not in multi-cluster mode")
+	if k.freshMultiClusterManager != nil {
+		return k.freshMultiClusterManager.GetManager(clusterName)
 	}
-	return k.multiClusterManager.GetManager(clusterName)
+	if k.simpleMultiClusterManager != nil {
+		return k.simpleMultiClusterManager.GetManager(clusterName)
+	}
+	if k.multiClusterManager != nil {
+		return k.multiClusterManager.GetManager(clusterName)
+	}
+	return nil, fmt.Errorf("not in multi-cluster mode")
 }
 
 // SwitchCluster switches to a different cluster (multi-cluster mode only)
 func (k *Kubernetes) SwitchCluster(clusterName string) error {
-	if !k.IsMultiCluster() {
-		return fmt.Errorf("not in multi-cluster mode")
+	if k.freshMultiClusterManager != nil {
+		return k.freshMultiClusterManager.SwitchCluster(clusterName)
 	}
-	return k.multiClusterManager.SwitchCluster(clusterName)
+	if k.simpleMultiClusterManager != nil {
+		return k.simpleMultiClusterManager.SwitchCluster(clusterName)
+	}
+	if k.multiClusterManager != nil {
+		return k.multiClusterManager.SwitchCluster(clusterName)
+	}
+	return fmt.Errorf("not in multi-cluster mode")
 }
 
 // GetActiveCluster returns the currently active cluster name (multi-cluster mode only)
 func (k *Kubernetes) GetActiveCluster() string {
-	if !k.IsMultiCluster() {
-		return ""
+	if k.freshMultiClusterManager != nil {
+		return k.freshMultiClusterManager.GetActiveCluster()
 	}
-	return k.multiClusterManager.GetActiveCluster()
+	if k.simpleMultiClusterManager != nil {
+		return k.simpleMultiClusterManager.GetActiveCluster()
+	}
+	if k.multiClusterManager != nil {
+		return k.multiClusterManager.GetActiveCluster()
+	}
+	return ""
 }
 
 // ListClusters returns all available clusters (multi-cluster mode only)
 func (k *Kubernetes) ListClusters() []ClusterConfig {
-	if !k.IsMultiCluster() {
-		return nil
+	if k.freshMultiClusterManager != nil {
+		clusters := k.freshMultiClusterManager.ListClusters()
+		if len(clusters) == 0 {
+			return nil
+		}
+		return clusters
 	}
-	return k.multiClusterManager.ListClusters()
+	if k.simpleMultiClusterManager != nil {
+		clusters := k.simpleMultiClusterManager.ListClusters()
+		if len(clusters) == 0 {
+			return nil
+		}
+		return clusters
+	}
+	if k.multiClusterManager != nil {
+		clusters := k.multiClusterManager.ListClusters()
+		if len(clusters) == 0 {
+			return nil
+		}
+		return clusters
+	}
+	return nil
+}
+
+// RefreshClusters refreshes the cluster list (multi-cluster mode only)
+func (k *Kubernetes) RefreshClusters(ctx context.Context) error {
+	if k.freshMultiClusterManager != nil {
+		return k.freshMultiClusterManager.RefreshClusters(ctx)
+	}
+	if k.simpleMultiClusterManager != nil {
+		return k.simpleMultiClusterManager.RefreshClusters(ctx)
+	}
+	if k.multiClusterManager != nil {
+		return k.multiClusterManager.RefreshClusters(ctx)
+	}
+	return fmt.Errorf("not in multi-cluster mode")
 }
 
 // RefreshClusters refreshes the cluster list (multi-cluster mode only)
@@ -243,12 +347,21 @@ func (m *Manager) WatchKubeConfig(onKubeConfigChange func() error) {
 }
 
 func (m *Manager) Close() {
+	// Check if already closed
+	m.closedMu.Lock()
+	if m.closed {
+		m.closedMu.Unlock()
+		return // Already closed, don't run cleanup again
+	}
+	m.closed = true
+	m.closedMu.Unlock()
+
 	// Cancel context to stop all goroutines
 	if m.cancel != nil {
 		m.cancel()
 	}
 
-	// Run all cleanup functions
+	// Run all cleanup functions (only once)
 	for _, cleanup := range m.cleanupFuncs {
 		if err := cleanup(); err != nil {
 			// Log error but continue with other cleanups
@@ -269,12 +382,25 @@ func (m *Manager) Close() {
 
 // RegisterCleanup registers a cleanup function to be called when the manager is closed
 func (m *Manager) RegisterCleanup(cleanup func() error) {
+	m.closedMu.Lock()
+	defer m.closedMu.Unlock()
+
+	// Don't add cleanup functions if already closed
+	if m.closed {
+		return
+	}
+
 	m.cleanupFuncs = append(m.cleanupFuncs, cleanup)
 }
 
 // GetContext returns the manager's context for long-running operations
 func (m *Manager) GetContext() context.Context {
 	return m.ctx
+}
+
+// GetDynamicClient returns the dynamic client
+func (m *Manager) GetDynamicClient() *dynamic.DynamicClient {
+	return m.dynamicClient
 }
 
 func (m *Manager) GetAPIServerHost() string {

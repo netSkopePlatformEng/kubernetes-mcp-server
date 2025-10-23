@@ -27,3 +27,17 @@ python/build/
 python/dist/
 python/kubernetes_mcp_server.egg-info/
 !python/kubernetes-mcp-server
+
+# Test binaries and output
+test-*
+coverage.out
+coverage.html
+debug-*.go
+.claude/settings.local.json
+
+# Rancher configuration files (may contain tokens)
+rancher-config.toml
+rancher-config.*.toml
+
+# Test executables
+cmd/test-rancher/

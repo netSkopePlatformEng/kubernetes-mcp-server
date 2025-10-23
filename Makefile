@@ -15,6 +15,9 @@ LD_FLAGS = -s -w \
 	-X '$(PACKAGE)/pkg/version.BinaryName=$(BINARY_NAME)'
 COMMON_BUILD_ARGS = -ldflags "$(LD_FLAGS)"
 
+# GoReleaser configuration
+GORELEASER := $(shell which goreleaser 2>/dev/null)
+
 GOLANGCI_LINT = $(shell pwd)/_output/tools/bin/golangci-lint
 GOLANGCI_LINT_VERSION ?= v2.2.2
 
@@ -44,18 +47,71 @@ help: ## Display this help
 
 .PHONY: clean
 clean: ## Clean up all build artifacts
-	rm -rf $(CLEAN_TARGETS)
+	rm -rf $(CLEAN_TARGETS) dist/
+
+##@ Build
 
 .PHONY: build
-build: clean tidy format ## Build the project
+build: tidy format ## Build the project for current platform
+ifdef GORELEASER
+	@echo "Building with GoReleaser..."
+	goreleaser build --snapshot --clean --single-target
+	@cp dist/kubernetes-mcp-server_*/kubernetes-mcp-server ./$(BINARY_NAME) 2>/dev/null || \
+		cp dist/kubernetes-mcp-server_*/kubernetes-mcp-server.exe ./$(BINARY_NAME).exe 2>/dev/null || true
+else
+	@echo "Building with go build (install goreleaser for better builds)..."
 	go build $(COMMON_BUILD_ARGS) -o $(BINARY_NAME) ./cmd/kubernetes-mcp-server
-
+endif
 
 .PHONY: build-all-platforms
-build-all-platforms: clean tidy format ## Build the project for all platforms
+build-all-platforms: tidy format ## Build the project for all platforms using GoReleaser
+ifdef GORELEASER
+	@echo "Building all platforms with GoReleaser..."
+	goreleaser build --snapshot --clean
+else
+	@echo "Building all platforms with go build..."
 	$(foreach os,$(OSES),$(foreach arch,$(ARCHS), \
 		GOOS=$(os) GOARCH=$(arch) go build $(COMMON_BUILD_ARGS) -o $(BINARY_NAME)-$(os)-$(arch)$(if $(findstring windows,$(os)),.exe,) ./cmd/kubernetes-mcp-server; \
 	))
+endif
+
+##@ GoReleaser
+
+.PHONY: goreleaser-check
+goreleaser-check: ## Check GoReleaser configuration
+ifdef GORELEASER
+	goreleaser check
+else
+	@echo "GoReleaser not installed. Install with: go install github.com/goreleaser/goreleaser/v2@latest"
+	@exit 1
+endif
+
+.PHONY: snapshot
+snapshot: ## Create a snapshot release with GoReleaser
+ifdef GORELEASER
+	goreleaser release --snapshot --clean
+else
+	@echo "GoReleaser not installed. Install with: go install github.com/goreleaser/goreleaser/v2@latest"
+	@exit 1
+endif
+
+.PHONY: release
+release: ## Create a release with GoReleaser (requires tag)
+ifdef GORELEASER
+	goreleaser release --clean
+else
+	@echo "GoReleaser not installed. Install with: go install github.com/goreleaser/goreleaser/v2@latest"
+	@exit 1
+endif
+
+.PHONY: release-dry-run
+release-dry-run: ## Dry run of release process
+ifdef GORELEASER
+	goreleaser release --skip=publish,announce,sign --clean
+else
+	@echo "GoReleaser not installed. Install with: go install github.com/goreleaser/goreleaser/v2@latest"
+	@exit 1
+endif
 
 .PHONY: npm-copy-binaries
 npm-copy-binaries: build-all-platforms ## Copy the binaries to each npm package
@@ -111,3 +167,63 @@ golangci-lint: ## Download and install golangci-lint if not already installed
 .PHONY: lint
 lint: golangci-lint ## Lint the code
 	$(GOLANGCI_LINT) run --verbose --print-resources-usage
+
+##@ Docker
+
+.PHONY: docker-build
+docker-build: ## Build Docker image
+	docker build -t kubernetes-mcp-server:latest .
+
+.PHONY: docker-run
+docker-run: ## Run Docker container with kubeconfig directory mounted
+	docker run -d \
+		--name kubernetes-mcp-server \
+		-p 8080:8080 \
+		-v $(HOME)/.mcp:/mcp:ro \
+		kubernetes-mcp-server:latest \
+		--port=8080 \
+		--kubeconfig-dir=/mcp
+
+.PHONY: docker-run-rancher
+docker-run-rancher: ## Run Docker container with Rancher integration
+	docker run -d \
+		--name kubernetes-mcp-server \
+		-p 8080:8080 \
+		-v $(HOME)/.mcp:/mcp:ro \
+		-e RANCHER_URL=$(RANCHER_URL) \
+		-e RANCHER_TOKEN=$(RANCHER_TOKEN) \
+		kubernetes-mcp-server:latest \
+		--port=8080 \
+		--kubeconfig-dir=/mcp \
+		--rancher-url=$(RANCHER_URL) \
+		--rancher-token=$(RANCHER_TOKEN)
+
+.PHONY: docker-stop
+docker-stop: ## Stop and remove Docker container
+	docker stop kubernetes-mcp-server || true
+	docker rm kubernetes-mcp-server || true
+
+.PHONY: docker-logs
+docker-logs: ## Show Docker container logs
+	docker logs -f kubernetes-mcp-server
+
+.PHONY: docker-shell
+docker-shell: ## Open shell in running container
+	docker exec -it kubernetes-mcp-server /bin/sh
+
+.PHONY: compose-up
+compose-up: ## Start services with docker-compose
+	docker-compose up -d
+
+.PHONY: compose-down
+compose-down: ## Stop services with docker-compose
+	docker-compose down
+
+.PHONY: compose-logs
+compose-logs: ## Show docker-compose logs
+	docker-compose logs -f
+
+.PHONY: compose-rebuild
+compose-rebuild: ## Rebuild and restart with docker-compose
+	docker-compose down
+	docker-compose up -d --build

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
 )
 
 const (

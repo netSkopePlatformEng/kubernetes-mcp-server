@@ -1,18 +1,18 @@
-# Kubernetes MCP Server
+# Kubernetes MCP Server (Netskope Fork)
 
-[![GitHub License](https://img.shields.io/github/license/containers/kubernetes-mcp-server)](https://github.com/containers/kubernetes-mcp-server/blob/main/LICENSE)
-[![npm](https://img.shields.io/npm/v/kubernetes-mcp-server)](https://www.npmjs.com/package/kubernetes-mcp-server)
-[![PyPI - Version](https://img.shields.io/pypi/v/kubernetes-mcp-server)](https://pypi.org/project/kubernetes-mcp-server/)
-[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/containers/kubernetes-mcp-server?sort=semver)](https://github.com/containers/kubernetes-mcp-server/releases/latest)
-[![Build](https://github.com/containers/kubernetes-mcp-server/actions/workflows/build.yaml/badge.svg)](https://github.com/containers/kubernetes-mcp-server/actions/workflows/build.yaml)
+[![GitHub License](https://img.shields.io/github/license/netSkopePlatformEng/kubernetes-mcp-server)](https://github.com/netSkopePlatformEng/kubernetes-mcp-server/blob/main/LICENSE)
+[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/netSkopePlatformEng/kubernetes-mcp-server?sort=semver)](https://github.com/netSkopePlatformEng/kubernetes-mcp-server/releases/latest)
+[![Build](https://github.com/netSkopePlatformEng/kubernetes-mcp-server/actions/workflows/build.yaml/badge.svg)](https://github.com/netSkopePlatformEng/kubernetes-mcp-server/actions/workflows/build.yaml)
 
-[✨ Features](#features) | [🚀 Getting Started](#getting-started) | [🎥 Demos](#demos) | [⚙️ Configuration](#configuration) | [🛠️ Tools](#tools) | [🧑‍💻 Development](#development)
+> **Note**: This is a Netskope Platform Engineering fork of the [original kubernetes-mcp-server](https://github.com/containers/kubernetes-mcp-server) with **enhanced multi-cluster support** and **Rancher API integration**.
+
+[✨ Features](#features) | [🚀 Getting Started](#getting-started) | [🎥 Demos](#demos) | [⚙️ Configuration](#configuration) | [🛠️ Tools](#tools) | [🐳 Docker](DOCKER.md) | [🧑‍💻 Development](#development)
 
 https://github.com/user-attachments/assets/be2b67b3-fc1c-4d11-ae46-93deba8ed98e
 
 ## ✨ Features <a id="features"></a>
 
-A powerful and flexible Kubernetes [Model Context Protocol (MCP)](https://blog.marcnuri.com/model-context-protocol-mcp-introduction) server implementation with support for **Kubernetes** and **OpenShift**.
+A powerful and flexible Kubernetes [Model Context Protocol (MCP)](https://blog.marcnuri.com/model-context-protocol-mcp-introduction) server implementation with support for **Kubernetes**, **OpenShift**, and **Rancher-managed multi-cluster environments**.
 
 - **✅ Configuration**:
   - Automatically detect changes in the Kubernetes configuration and update the MCP server.
@@ -34,6 +34,17 @@ A powerful and flexible Kubernetes [Model Context Protocol (MCP)](https://blog.m
   - **Install** a Helm chart in the current or provided namespace.
   - **List** Helm releases in all namespaces or in a specific namespace.
   - **Uninstall** a Helm release in the current or provided namespace.
+- **🌐 Multi-Cluster (Netskope Fork)**:
+  - **List** all available clusters from kubeconfig directory.
+  - **Switch** between clusters dynamically without restarting.
+  - **Status** check cluster connectivity and health.
+  - **Refresh** cluster list from directory.
+  - **Execute** operations across multiple clusters asynchronously with job tracking.
+- **🐮 Rancher Integration (Netskope Fork)**:
+  - **List** all clusters in Rancher environment.
+  - **Download** kubeconfig files directly from Rancher API.
+  - **Batch download** all cluster kubeconfigs asynchronously.
+  - **Status** check Rancher cluster health and configuration.
 
 Unlike other Kubernetes MCP server implementations, this **IS NOT** just a wrapper around `kubectl` or `helm` command-line tools.
 It is a **Go-based native implementation** that interacts directly with the Kubernetes API server.
@@ -180,6 +191,10 @@ uvx kubernetes-mcp-server@latest --help
 | `--port`                | Starts the MCP server in Streamable HTTP mode (path /mcp) and Server-Sent Event (SSE) (path /sse) mode and listens on the specified port .                                                                                                                                                    |
 | `--log-level`           | Sets the logging level (values [from 0-9](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/logging.md)). Similar to [kubectl logging levels](https://kubernetes.io/docs/reference/kubectl/quick-reference/#kubectl-output-verbosity-and-debugging). |
 | `--kubeconfig`          | Path to the Kubernetes configuration file. If not provided, it will try to resolve the configuration (in-cluster, default location, etc.).                                                                                                                                                    |
+| `--kubeconfig-dir`      | **(Netskope Fork)** Directory containing multiple kubeconfig files for multi-cluster mode. Enables cluster switching and Rancher integration tools.                                                                                                                                            |
+| `--rancher-url`         | **(Netskope Fork)** Rancher server URL for API integration (e.g., `https://rancher.example.com`).                                                                                                                                                                                             |
+| `--rancher-token`       | **(Netskope Fork)** Rancher API token for authentication.                                                                                                                                                                                                                                     |
+| `--rancher-cluster-id`  | **(Netskope Fork)** Optional Rancher cluster ID filter.                                                                                                                                                                                                                                        |
 | `--list-output`         | Output format for resource list operations (one of: yaml, table) (default "table")                                                                                                                                                                                                            |
 | `--read-only`           | If set, the MCP server will run in read-only mode, meaning it will not allow any write operations (create, update, delete) on the Kubernetes cluster. This is useful for debugging or inspecting the cluster without making changes.                                                          |
 | `--disable-destructive` | If set, the MCP server will disable all destructive operations (delete, update, etc.) on the Kubernetes cluster. This is useful for debugging or inspecting the cluster without accidentally making changes. This option has no effect when `--read-only` is used.                            |
@@ -417,6 +432,109 @@ List Kubernetes resources and objects in the current cluster
   - Lists resources from all namespaces if not provided
 - `labelSelector` (`string`, optional)
   - Kubernetes label selector (e.g., 'app=myapp,env=prod' or 'app in (myapp,yourapp)'). Use this option to filter the pods by label.
+
+---
+
+## Multi-Cluster Tools (Netskope Fork)
+
+### `clusters_list`
+
+List all available Kubernetes clusters in multi-cluster mode
+
+**Parameters:**
+- `show_details` (`boolean`, optional) - Include detailed cluster information such as environment and description
+
+### `clusters_switch`
+
+Switch to a different Kubernetes cluster in multi-cluster mode
+
+**Parameters:**
+- `cluster` (`string`, required) - Name of the cluster to switch to
+
+### `clusters_status`
+
+Check the status and connectivity of Kubernetes clusters
+
+**Parameters:**
+- `cluster` (`string`, optional) - Specific cluster to check (checks all if not provided)
+
+### `clusters_refresh`
+
+Refresh the cluster list and update cluster information
+
+**Parameters:**
+- `force` (`boolean`, optional) - Force refresh even if recently updated
+
+### `start_clusters_exec`
+
+Execute operation across multiple clusters asynchronously (returns job_id)
+
+**Parameters:**
+- `operation` (`string`, required) - Operation to execute (e.g., 'resources_list', 'pods_list')
+- `arguments` (`object`, optional) - Arguments for the operation
+- `clusters` (`array`, optional) - List of cluster names (empty = all clusters)
+- `continue_on_error` (`boolean`, optional) - Continue if a cluster fails (default: true)
+- `fanout_limit` (`number`, optional) - Max concurrent executions (default: 10)
+- `timeout_per_cluster` (`string`, optional) - Timeout per cluster (e.g., '30s', '1m', default: '30s')
+
+### `get_job_status`
+
+Get the current status and progress of a background job
+
+**Parameters:**
+- `job_id` (`string`, required) - Job ID returned from start_* command
+
+### `get_job_results`
+
+Get paginated results from a completed or running job
+
+**Parameters:**
+- `job_id` (`string`, required) - Job ID
+- `page_size` (`number`, optional) - Number of results per page (default: 10, max: 50)
+- `cursor` (`string`, optional) - Pagination cursor from previous response
+- `include_full_results` (`boolean`, optional) - Include full result details (default: false)
+
+### `cancel_job`
+
+Cancel a running background job
+
+**Parameters:**
+- `job_id` (`string`, required) - Job ID to cancel
+
+---
+
+## Rancher Integration Tools (Netskope Fork)
+
+### `rancher_list_clusters`
+
+List all clusters available in Rancher
+
+**Parameters:** None
+
+### `rancher_download_cluster`
+
+Download kubeconfig for a specific cluster from Rancher
+
+**Parameters:**
+- `cluster_name` (`string`, required) - Name of the cluster to download
+
+### `rancher_download_all`
+
+Download kubeconfigs for ALL clusters from Rancher (returns job_id for async tracking)
+
+**Parameters:** None
+
+### `rancher_status`
+
+Get status of all Kubernetes clusters in Rancher
+
+**Parameters:** None
+
+### `rancher_integration_status`
+
+Get Rancher integration configuration status
+
+**Parameters:** None
 
 ## 🧑‍💻 Development <a id="development"></a>
 

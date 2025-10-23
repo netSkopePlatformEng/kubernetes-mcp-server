@@ -9,7 +9,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"k8s.io/utils/ptr"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
 )
 
 func TestUnrestricted(t *testing.T) {

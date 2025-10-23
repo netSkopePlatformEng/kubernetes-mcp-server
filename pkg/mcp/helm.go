@@ -65,10 +65,11 @@ func (s *Server) helmInstall(ctx context.Context, ctr mcp.CallToolRequest) (*mcp
 	if v, ok := ctr.GetArguments()["namespace"].(string); ok {
 		namespace = v
 	}
-	derived, err := s.k.Derived(ctx)
+	derived, cleanup, err := s.getFreshDerived(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	ret, err := derived.NewHelm().Install(ctx, chart, values, name, namespace)
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to install helm chart '%s': %w", chart, err)), nil
@@ -85,10 +86,11 @@ func (s *Server) helmList(ctx context.Context, ctr mcp.CallToolRequest) (*mcp.Ca
 	if v, ok := ctr.GetArguments()["namespace"].(string); ok {
 		namespace = v
 	}
-	derived, err := s.k.Derived(ctx)
+	derived, cleanup, err := s.getFreshDerived(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	ret, err := derived.NewHelm().List(namespace, allNamespaces)
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to list helm releases in namespace '%s': %w", namespace, err)), nil
@@ -106,10 +108,11 @@ func (s *Server) helmUninstall(ctx context.Context, ctr mcp.CallToolRequest) (*m
 	if v, ok := ctr.GetArguments()["namespace"].(string); ok {
 		namespace = v
 	}
-	derived, err := s.k.Derived(ctx)
+	derived, cleanup, err := s.getFreshDerived(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	ret, err := derived.NewHelm().Uninstall(name, namespace)
 	if err != nil {
 		return NewTextResult("", fmt.Errorf("failed to uninstall helm chart '%s': %w", name, err)), nil

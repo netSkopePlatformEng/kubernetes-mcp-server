@@ -1,0 +1,45 @@
+# Build artifacts
+dist/
+_output/
+kubernetes-mcp-server
+kubernetes-mcp-server-*
+
+# Go test cache
+*.test
+*.out
+coverage.txt
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Git
+.git/
+.gitignore
+
+# CI/CD
+.github/
+
+# NPM/Python packages
+npm/
+python/
+node_modules/
+
+# Test files
+*_test.go
+
+# Local development
+.env
+.env.local
+*.local
+
+# macOS
+.DS_Store

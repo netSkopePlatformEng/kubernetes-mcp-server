@@ -1,4 +1,4 @@
-module github.com/containers/kubernetes-mcp-server
+module github.com/netSkopePlatformEng/kubernetes-mcp-server
 
 go 1.24.1
 
@@ -7,11 +7,13 @@ require (
 	github.com/coreos/go-oidc/v3 v3.15.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-jose/go-jose/v4 v4.1.2
+	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.39.1
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/pflag v1.0.10
+	github.com/stretchr/testify v1.10.0
 	golang.org/x/oauth2 v0.31.0
 	golang.org/x/sync v0.17.0
 	helm.sh/helm/v3 v3.18.6
@@ -67,7 +69,6 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
 	github.com/gosuri/uitable v0.0.4 // indirect
 	github.com/gregjones/httpcache v0.0.0-20190611155906-901d90724c79 // indirect

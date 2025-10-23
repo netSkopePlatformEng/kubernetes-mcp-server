@@ -11,13 +11,14 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/kubernetes"
-	"github.com/containers/kubernetes-mcp-server/pkg/output"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/kubernetes"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/output"
 )
 
 func (s *Server) initResources() []server.ServerTool {
 	commonApiVersion := "v1 Pod, v1 Service, v1 Node, apps/v1 Deployment, networking.k8s.io/v1 Ingress"
-	if s.k.IsOpenShift(context.Background()) {
+	// Only check for OpenShift if we have an active cluster
+	if s.k != nil && s.k.IsOpenShift(context.Background()) {
 		commonApiVersion += ", route.openshift.io/v1 Route"
 	}
 	commonApiVersion = fmt.Sprintf("(common apiVersion and kind include: %s)", commonApiVersion)
@@ -130,10 +131,13 @@ func (s *Server) resourcesList(ctx context.Context, ctr mcp.CallToolRequest) (*m
 		return NewTextResult("", fmt.Errorf("namespace is not a string")), nil
 	}
 
-	derived, err := s.k.Derived(ctx)
+	// Get fresh derived client for the active cluster
+	derived, cleanup, err := s.getFreshDerived(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
+
 	ret, err := derived.ResourcesList(ctx, gvk, ns, resourceListOptions)
 	if err != nil {
 		errorMsg := s.formatKubernetesError(err)
@@ -166,10 +170,11 @@ func (s *Server) resourcesGet(ctx context.Context, ctr mcp.CallToolRequest) (*mc
 		return NewTextResult("", fmt.Errorf("name is not a string")), nil
 	}
 
-	derived, err := s.k.Derived(ctx)
+	derived, cleanup, err := s.getFreshDerived(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	ret, err := derived.ResourcesGet(ctx, gvk, ns, n)
 	if err != nil {
 		errorMsg := s.formatKubernetesError(err)
@@ -189,10 +194,11 @@ func (s *Server) resourcesCreateOrUpdate(ctx context.Context, ctr mcp.CallToolRe
 		return NewTextResult("", fmt.Errorf("resource is not a string")), nil
 	}
 
-	derived, err := s.k.Derived(ctx)
+	derived, cleanup, err := s.getFreshDerived(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	resources, err := derived.ResourcesCreateOrUpdate(ctx, r)
 	if err != nil {
 		// Enhanced error handling for better user experience
@@ -230,10 +236,11 @@ func (s *Server) resourcesDelete(ctx context.Context, ctr mcp.CallToolRequest) (
 		return NewTextResult("", fmt.Errorf("name is not a string")), nil
 	}
 
-	derived, err := s.k.Derived(ctx)
+	derived, cleanup, err := s.getFreshDerived(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
 	err = derived.ResourcesDelete(ctx, gvk, ns, n)
 	if err != nil {
 		errorMsg := s.formatKubernetesError(err)

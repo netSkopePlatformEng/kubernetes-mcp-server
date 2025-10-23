@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
 	"k8s.io/klog/v2"
 )
 
