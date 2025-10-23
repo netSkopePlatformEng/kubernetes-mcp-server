@@ -24,8 +24,8 @@ type StaticConfig struct {
 	AutoDiscovery  bool              `toml:"auto_discovery,omitempty"`
 	ClusterAliases map[string]string `toml:"cluster_aliases,omitempty"`
 
-	// NSK Integration
-	NSKIntegration *NSKConfig `toml:"nsk,omitempty"`
+	// Rancher Integration
+	RancherIntegration *RancherConfig `toml:"rancher,omitempty"`
 
 	ListOutput string `toml:"list_output,omitempty"`
 	// When true, expose only tools annotated with readOnlyHint=true
@@ -68,17 +68,16 @@ type GroupVersionKind struct {
 	Kind    string `toml:"kind,omitempty"`
 }
 
-// NSKConfig represents configuration for NSK (Netskope Kubernetes) tool integration
-type NSKConfig struct {
-	// Core NSK settings
-	Enabled bool   `toml:"enabled,omitempty"`
-	NSKPath string `toml:"nsk_path,omitempty"` // Path to NSK binary, defaults to "nsk"
+// RancherConfig represents configuration for Rancher API integration
+type RancherConfig struct {
+	// Core settings
+	Enabled  bool   `toml:"enabled,omitempty"`
+	URL      string `toml:"url,omitempty"`      // Rancher URL (e.g., "https://rancher.example.com")
+	Token    string `toml:"token,omitempty"`    // Rancher API token
+	Insecure bool   `toml:"insecure,omitempty"` // Skip TLS verification
 
-	// Rancher environment settings
-	RancherURL   string `toml:"rancher_url,omitempty"`
-	RancherToken string `toml:"rancher_token,omitempty"`
-	Profile      string `toml:"profile,omitempty"`
-	ConfigDir    string `toml:"config_dir,omitempty"`
+	// Configuration directory
+	ConfigDir string `toml:"config_dir,omitempty"` // Where to store downloaded kubeconfig files
 
 	// Auto-refresh settings
 	AutoRefresh     bool   `toml:"auto_refresh,omitempty"`
@@ -88,9 +87,6 @@ type NSKConfig struct {
 	ClusterPattern  string   `toml:"cluster_pattern,omitempty"` // Regex pattern for cluster names
 	ExcludeClusters []string `toml:"exclude_clusters,omitempty"`
 	IncludeClusters []string `toml:"include_clusters,omitempty"`
-
-	// Environment variables for NSK execution
-	Environment map[string]string `toml:"environment,omitempty"`
 }
 
 // ReadConfig reads the toml file and returns the StaticConfig.
@@ -126,7 +122,7 @@ func (c *StaticConfig) IsMultiClusterEnabled() bool {
 	return c.KubeConfigDir != ""
 }
 
-// IsNSKEnabled returns true if NSK integration is enabled
-func (c *StaticConfig) IsNSKEnabled() bool {
-	return c.NSKIntegration != nil && c.NSKIntegration.Enabled
+// IsRancherEnabled returns true if Rancher integration is enabled
+func (c *StaticConfig) IsRancherEnabled() bool {
+	return c.RancherIntegration != nil && c.RancherIntegration.Enabled
 }

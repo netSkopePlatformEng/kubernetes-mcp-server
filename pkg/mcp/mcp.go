@@ -13,10 +13,11 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
-	internalk8s "github.com/containers/kubernetes-mcp-server/pkg/kubernetes"
-	"github.com/containers/kubernetes-mcp-server/pkg/output"
-	"github.com/containers/kubernetes-mcp-server/pkg/version"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
+	internalk8s "github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/kubernetes"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/mcp/jobs"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/output"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/version"
 )
 
 type ContextKey string
@@ -47,11 +48,14 @@ func (c *Configuration) isToolApplicable(tool server.ServerTool) bool {
 }
 
 type Server struct {
-	configuration *Configuration
-	server        *server.MCPServer
-	enabledTools  []string
-	k             *internalk8s.Manager
-	k8s           *internalk8s.Kubernetes // Add persistent Kubernetes instance for multi-cluster
+	configuration  *Configuration
+	server         *server.MCPServer
+	enabledTools   []string
+	k              *internalk8s.Manager
+	k8s            *internalk8s.Kubernetes               // Add persistent Kubernetes instance for multi-cluster
+	clusterManager *internalk8s.FreshMultiClusterManager // Fresh multi-cluster manager (kubectl-style)
+	rancher        *internalk8s.RancherIntegration       // Rancher integration for kubeconfig management
+	jobManager     *jobs.Manager                         // Job manager for async long-running tasks
 }
 
 func NewServer(configuration Configuration) (*Server, error) {
@@ -75,12 +79,87 @@ func NewServer(configuration Configuration) (*Server, error) {
 			serverOptions...,
 		),
 	}
+
+	// Initialize multi-cluster support if enabled
+	if configuration.StaticConfig.IsMultiClusterEnabled() {
+		if err := s.initializeMultiCluster(); err != nil {
+			return nil, fmt.Errorf("failed to initialize multi-cluster support: %w", err)
+		}
+	}
+
+	// Initialize JobManager for async long-running tasks
+	if err := s.initializeJobManager(); err != nil {
+		return nil, fmt.Errorf("failed to initialize job manager: %w", err)
+	}
+
 	if err := s.reloadKubernetesClient(); err != nil {
 		return nil, err
 	}
-	s.k.WatchKubeConfig(s.reloadKubernetesClient)
+	// Only watch kubeconfig if we have an active manager
+	if s.k != nil {
+		s.k.WatchKubeConfig(s.reloadKubernetesClient)
+	}
 
 	return s, nil
+}
+
+// initializeMultiCluster initializes multi-cluster support components
+func (s *Server) initializeMultiCluster() error {
+	logger := klog.Background()
+
+	// Initialize fresh multi-cluster manager (kubectl-style - creates fresh clients per operation)
+	mcm, err := internalk8s.NewFreshMultiClusterManager(s.configuration.StaticConfig, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create fresh multi-cluster manager: %w", err)
+	}
+	s.clusterManager = mcm
+
+	// Initialize Rancher integration if configured
+	if s.configuration.StaticConfig.IsRancherEnabled() {
+		s.rancher = internalk8s.NewRancherIntegration(
+			s.configuration.StaticConfig.RancherIntegration,
+			s.clusterManager,
+			logger,
+		)
+		logger.Info("Rancher integration initialized",
+			"url", s.configuration.StaticConfig.RancherIntegration.URL,
+			"config_dir", s.configuration.StaticConfig.RancherIntegration.ConfigDir)
+	}
+
+	// Start the multi-cluster manager
+	ctx := context.Background()
+	if err := s.clusterManager.Start(ctx); err != nil {
+		logger.Error(err, "Failed to start multi-cluster manager")
+		// Don't fail if no clusters found initially
+	}
+
+	logger.Info("Multi-cluster support initialized",
+		"clusters", len(s.clusterManager.ListClusters()),
+		"rancher_enabled", s.configuration.StaticConfig.IsRancherEnabled())
+
+	return nil
+}
+
+// initializeJobManager initializes the job manager for async long-running tasks
+func (s *Server) initializeJobManager() error {
+	logger := klog.Background()
+
+	// Create job manager with default configuration
+	config := jobs.DefaultManagerConfig()
+	// Override with custom settings if needed
+	config.StorageDir = "~/.mcp/jobs"
+	config.MaxJobs = 100
+	config.WorkerCount = 5
+
+	jobManager, err := jobs.NewManager(config)
+	if err != nil {
+		return fmt.Errorf("failed to create job manager: %w", err)
+	}
+
+	s.jobManager = jobManager
+	logger.Info("JobManager initialized", "workers", config.WorkerCount, "maxJobs", config.MaxJobs)
+
+	return nil
 }
 
 func (s *Server) reloadKubernetesClient() error {
@@ -91,32 +170,48 @@ func (s *Server) reloadKubernetesClient() error {
 		// Create or reuse the multi-cluster Kubernetes instance
 		if s.k8s == nil {
 			logger.V(2).Info("Creating new multi-cluster Kubernetes instance")
-			k8s, err := internalk8s.NewKubernetes(s.configuration.StaticConfig, logger)
-			if err != nil {
-				logger.Error(err, "Failed to create multi-cluster Kubernetes instance")
-				return err
+			// Use the existing clusterManager if available, otherwise create a new one
+			if s.clusterManager != nil {
+				// Use existing cluster manager to maintain cluster switch state
+				s.k8s = internalk8s.NewKubernetesWithFreshMultiClusterManager(s.clusterManager)
+				logger.V(2).Info("Created Kubernetes instance with existing fresh cluster manager")
+			} else {
+				// Create new instance (should not happen in multi-cluster mode)
+				k8s, err := internalk8s.NewKubernetes(s.configuration.StaticConfig, logger)
+				if err != nil {
+					logger.Error(err, "Failed to create multi-cluster Kubernetes instance")
+					return err
+				}
+				s.k8s = k8s
 			}
-			s.k8s = k8s
 		}
 
 		// Get the Manager from the Kubernetes instance (which reflects current active cluster)
 		activeCluster := s.k8s.GetActiveCluster()
-		logger.V(2).Info("Getting manager for active cluster", "cluster", activeCluster)
 
-		manager, err := s.k8s.GetManager()
-		if err != nil {
-			logger.Error(err, "Failed to get manager for active cluster", "cluster", activeCluster)
-			return err
+		// If there are no clusters yet (empty kubeconfig directory), skip manager initialization
+		// Tools will fail gracefully when called if no cluster is active
+		if activeCluster == "" {
+			logger.V(2).Info("No clusters available yet, skipping manager initialization")
+			s.k = nil
+		} else {
+			logger.V(2).Info("Getting manager for active cluster", "cluster", activeCluster)
+
+			manager, err := s.k8s.GetManager()
+			if err != nil {
+				logger.Error(err, "Failed to get manager for active cluster", "cluster", activeCluster)
+				return err
+			}
+
+			// Validate the manager has proper configuration
+			restConfig, err := manager.ToRESTConfig()
+			if err != nil || restConfig == nil {
+				return fmt.Errorf("manager for cluster %s has no valid rest config: %w", activeCluster, err)
+			}
+
+			logger.V(2).Info("Successfully reloaded manager", "cluster", activeCluster, "server", restConfig.Host)
+			s.k = manager
 		}
-
-		// Validate the manager has proper configuration
-		restConfig, err := manager.ToRESTConfig()
-		if err != nil || restConfig == nil {
-			return fmt.Errorf("manager for cluster %s has no valid rest config: %w", activeCluster, err)
-		}
-
-		logger.V(2).Info("Successfully reloaded manager", "cluster", activeCluster, "server", restConfig.Host)
-		s.k = manager
 	} else {
 		// Use legacy single-cluster manager
 		logger.V(2).Info("Creating single-cluster manager")
@@ -135,23 +230,11 @@ func (s *Server) reloadKubernetesClient() error {
 		applicableTools = append(applicableTools, tool)
 		s.enabledTools = append(s.enabledTools, tool.Tool.Name)
 	}
-	s.server.SetTools(applicableTools...)
+	// Only set tools if server is initialized (not nil in tests)
+	if s.server != nil {
+		s.server.SetTools(applicableTools...)
+	}
 	return nil
-}
-
-// getManager returns the current active Manager instance
-// In multi-cluster mode, this always gets the latest active cluster's manager
-// In single-cluster mode, this returns the cached manager
-func (s *Server) getManager() (*internalk8s.Manager, error) {
-	if s.configuration.StaticConfig.IsMultiClusterEnabled() && s.k8s != nil {
-		// Always get the current active manager from k8s to ensure we have the right cluster
-		return s.k8s.GetManager()
-	}
-	// Fall back to cached manager for single-cluster mode
-	if s.k == nil {
-		return nil, fmt.Errorf("kubernetes manager not initialized")
-	}
-	return s.k, nil
 }
 
 // validateManagerAuthentication performs a basic authentication check for the manager
@@ -176,6 +259,21 @@ func (s *Server) validateManagerAuthentication(manager *internalk8s.Manager, clu
 		"server_version", serverVersion.String())
 
 	return nil
+}
+
+// getManager returns the current active Manager instance
+// In multi-cluster mode, this always gets the latest active cluster's manager
+// In single-cluster mode, this returns the cached manager
+func (s *Server) getManager() (*internalk8s.Manager, error) {
+	if s.configuration.StaticConfig.IsMultiClusterEnabled() && s.k8s != nil {
+		// Always get the current active manager from k8s to ensure we have the right cluster
+		return s.k8s.GetManager()
+	}
+	// Fall back to cached manager for single-cluster mode
+	if s.k == nil {
+		return nil, fmt.Errorf("kubernetes manager not initialized")
+	}
+	return s.k, nil
 }
 
 func (s *Server) ServeStdio() error {
@@ -229,6 +327,45 @@ func (s *Server) Close() {
 	} else if s.k != nil {
 		s.k.Close()
 	}
+}
+
+// getFreshDerived gets a fresh derived Kubernetes client for the active cluster.
+// In multi-cluster mode, this ensures we always use the correct cluster's manager.
+// The cleanup function MUST be called when done to avoid resource leaks.
+func (s *Server) getFreshDerived(ctx context.Context) (*internalk8s.Kubernetes, func(), error) {
+	// Multi-cluster mode: get fresh manager for active cluster
+	if s.k8s != nil {
+		manager, err := s.k8s.GetManager()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get manager for active cluster: %w", err)
+		}
+
+		derived, err := manager.Derived(ctx)
+		if err != nil {
+			manager.Close()
+			return nil, nil, fmt.Errorf("failed to get derived client: %w", err)
+		}
+
+		// Return cleanup function that closes the manager
+		cleanup := func() {
+			manager.Close()
+		}
+
+		return derived, cleanup, nil
+	}
+
+	// Single-cluster mode: use cached manager (no cleanup needed)
+	if s.k == nil {
+		return nil, nil, fmt.Errorf("kubernetes manager is not initialized")
+	}
+
+	derived, err := s.k.Derived(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get derived client: %w", err)
+	}
+
+	// No cleanup needed for cached manager
+	return derived, func() {}, nil
 }
 
 func NewTextResult(content string, err error) *mcp.CallToolResult {

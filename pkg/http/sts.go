@@ -7,7 +7,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google/externalaccount"
 
-	"github.com/containers/kubernetes-mcp-server/pkg/config"
+	"github.com/netSkopePlatformEng/kubernetes-mcp-server/pkg/config"
 )
 
 type staticSubjectTokenSupplier struct {

@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  kubernetes-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kubernetes-mcp-server:latest
+    container_name: kubernetes-mcp-server
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount kubeconfig directory for multi-cluster support
+      - ${HOME}/.mcp:/mcp:ro
+      # Optional: Mount Rancher config if using environment variables
+      - ${HOME}/.rancher:/rancher:ro
+    environment:
+      # Multi-cluster mode
+      - KUBECONFIG_DIR=/mcp
+      # Rancher integration (optional)
+      - RANCHER_URL=${RANCHER_URL:-}
+      - RANCHER_TOKEN=${RANCHER_TOKEN:-}
+      - RANCHER_CLUSTER_ID=${RANCHER_CLUSTER_ID:-}
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-2}
+      # Server mode
+      - LIST_OUTPUT=${LIST_OUTPUT:-table}
+    command:
+      - "--port=8080"
+      - "--kubeconfig-dir=/mcp"
+      - "--log-level=${LOG_LEVEL:-2}"
+      - "--list-output=${LIST_OUTPUT:-table}"
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge
