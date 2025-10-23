@@ -261,6 +261,30 @@ func (s *Server) validateManagerAuthentication(manager *internalk8s.Manager, clu
 	return nil
 }
 
+// validateManagerAuthentication performs a basic authentication check for the manager
+func (s *Server) validateManagerAuthentication(manager *internalk8s.Manager, clusterName string) error {
+	logger := klog.Background()
+
+	// Try to get a discovery client and perform a simple API call
+	discoveryClient, err := manager.ToDiscoveryClient()
+	if err != nil {
+		logger.V(3).Info("Failed to get discovery client", "cluster", clusterName, "error", err)
+		return fmt.Errorf("failed to get discovery client: %w", err)
+	}
+
+	// Perform a basic server version check to validate authentication
+	serverVersion, err := discoveryClient.ServerVersion()
+	if err != nil {
+		logger.V(3).Info("Server version check failed", "cluster", clusterName, "error", err)
+		return fmt.Errorf("server version check failed: %w", err)
+	}
+
+	logger.V(3).Info("Authentication validation successful", "cluster", clusterName,
+		"server_version", serverVersion.String())
+
+	return nil
+}
+
 func (s *Server) ServeStdio() error {
 	return server.ServeStdio(s.server)
 }

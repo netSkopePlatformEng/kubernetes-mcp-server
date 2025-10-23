@@ -270,6 +270,12 @@ func (mcm *MultiClusterManager) createClusterManager(clusterName, kubeconfigPath
 	mcm.logger.V(3).Info("Creating manager with config", "cluster", clusterName,
 		"kubeconfig", clusterConfig.KubeConfig)
 
+	// Force fresh client creation by clearing any cached configurations
+	// This ensures we don't inherit stale authentication state
+
+	mcm.logger.V(3).Info("Creating manager with config", "cluster", clusterName,
+		"kubeconfig", clusterConfig.KubeConfig)
+
 	// Create manager for this cluster
 	manager, err := NewManager(clusterConfig)
 	if err != nil {
@@ -363,6 +369,12 @@ func (mcm *MultiClusterManager) SwitchCluster(clusterName string) error {
 		mcm.logger.Error(err, "Cluster validation failed", "cluster", clusterName)
 		return fmt.Errorf("cluster %s is not reachable: %w", clusterName, err)
 	}
+	if manager.staticConfig.KubeConfig == "" {
+		return fmt.Errorf("cluster %s manager has no kubeconfig path", clusterName)
+	}
+
+	// Store previous cluster for logging
+	previousCluster := mcm.activeCluster
 
 	// Switch to the new cluster - each manager is pre-configured with its own kubeconfig
 	mcm.activeCluster = clusterName

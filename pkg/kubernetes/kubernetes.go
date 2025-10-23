@@ -275,6 +275,14 @@ func (k *Kubernetes) RefreshClusters(ctx context.Context) error {
 	return fmt.Errorf("not in multi-cluster mode")
 }
 
+// RefreshClusters refreshes the cluster list (multi-cluster mode only)
+func (k *Kubernetes) RefreshClusters(ctx context.Context) error {
+	if !k.IsMultiCluster() {
+		return fmt.Errorf("not in multi-cluster mode")
+	}
+	return k.multiClusterManager.RefreshClusters(ctx)
+}
+
 // StartMultiCluster starts the multi-cluster manager (multi-cluster mode only)
 func (k *Kubernetes) StartMultiCluster(ctx context.Context) error {
 	if !k.IsMultiCluster() {
