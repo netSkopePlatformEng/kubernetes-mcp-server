@@ -17,7 +17,8 @@ import (
 
 func (s *Server) initResources() []server.ServerTool {
 	commonApiVersion := "v1 Pod, v1 Service, v1 Node, apps/v1 Deployment, networking.k8s.io/v1 Ingress"
-	if s.k.IsOpenShift(context.Background()) {
+	k, err := s.getManager()
+	if err == nil && k.IsOpenShift(context.Background()) {
 		commonApiVersion += ", route.openshift.io/v1 Route"
 	}
 	commonApiVersion = fmt.Sprintf("(common apiVersion and kind include: %s)", commonApiVersion)
@@ -130,7 +131,11 @@ func (s *Server) resourcesList(ctx context.Context, ctr mcp.CallToolRequest) (*m
 		return NewTextResult("", fmt.Errorf("namespace is not a string")), nil
 	}
 
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +171,11 @@ func (s *Server) resourcesGet(ctx context.Context, ctr mcp.CallToolRequest) (*mc
 		return NewTextResult("", fmt.Errorf("name is not a string")), nil
 	}
 
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +198,11 @@ func (s *Server) resourcesCreateOrUpdate(ctx context.Context, ctr mcp.CallToolRe
 		return NewTextResult("", fmt.Errorf("resource is not a string")), nil
 	}
 
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +243,11 @@ func (s *Server) resourcesDelete(ctx context.Context, ctr mcp.CallToolRequest) (
 		return NewTextResult("", fmt.Errorf("name is not a string")), nil
 	}
 
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}

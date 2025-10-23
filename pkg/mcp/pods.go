@@ -129,7 +129,11 @@ func (s *Server) podsListInAllNamespaces(ctx context.Context, ctr mcp.CallToolRe
 	if labelSelector != nil {
 		resourceListOptions.LabelSelector = labelSelector.(string)
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +156,11 @@ func (s *Server) podsListInNamespace(ctx context.Context, ctr mcp.CallToolReques
 	if labelSelector != nil {
 		resourceListOptions.LabelSelector = labelSelector.(string)
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +180,11 @@ func (s *Server) podsGet(ctx context.Context, ctr mcp.CallToolRequest) (*mcp.Cal
 	if name == nil {
 		return NewTextResult("", errors.New("failed to get pod, missing argument name")), nil
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +204,11 @@ func (s *Server) podsDelete(ctx context.Context, ctr mcp.CallToolRequest) (*mcp.
 	if name == nil {
 		return NewTextResult("", errors.New("failed to delete pod, missing argument name")), nil
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +233,11 @@ func (s *Server) podsTop(ctx context.Context, ctr mcp.CallToolRequest) (*mcp.Cal
 	if v, ok := ctr.GetArguments()["label_selector"].(string); ok {
 		podsTopOptions.LabelSelector = v
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +278,11 @@ func (s *Server) podsExec(ctx context.Context, ctr mcp.CallToolRequest) (*mcp.Ca
 	} else {
 		return NewTextResult("", errors.New("failed to exec in pod, invalid command argument")), nil
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +308,11 @@ func (s *Server) podsLog(ctx context.Context, ctr mcp.CallToolRequest) (*mcp.Cal
 	if container == nil {
 		container = ""
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +342,11 @@ func (s *Server) podsRun(ctx context.Context, ctr mcp.CallToolRequest) (*mcp.Cal
 	if port == nil {
 		port = float64(0)
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}

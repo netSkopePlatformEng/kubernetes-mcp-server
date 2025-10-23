@@ -65,7 +65,11 @@ func (s *Server) helmInstall(ctx context.Context, ctr mcp.CallToolRequest) (*mcp
 	if v, ok := ctr.GetArguments()["namespace"].(string); ok {
 		namespace = v
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +89,11 @@ func (s *Server) helmList(ctx context.Context, ctr mcp.CallToolRequest) (*mcp.Ca
 	if v, ok := ctr.GetArguments()["namespace"].(string); ok {
 		namespace = v
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +114,11 @@ func (s *Server) helmUninstall(ctx context.Context, ctr mcp.CallToolRequest) (*m
 	if v, ok := ctr.GetArguments()["namespace"].(string); ok {
 		namespace = v
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}

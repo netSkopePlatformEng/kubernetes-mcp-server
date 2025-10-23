@@ -22,7 +22,8 @@ func (s *Server) initNamespaces() []server.ServerTool {
 			mcp.WithOpenWorldHintAnnotation(true),
 		), Handler: s.namespacesList,
 	})
-	if s.k.IsOpenShift(context.Background()) {
+	k, err := s.getManager()
+	if err == nil && k.IsOpenShift(context.Background()) {
 		ret = append(ret, server.ServerTool{
 			Tool: mcp.NewTool("projects_list",
 				mcp.WithDescription("List all the OpenShift projects in the current cluster"),
@@ -38,7 +39,11 @@ func (s *Server) initNamespaces() []server.ServerTool {
 }
 
 func (s *Server) namespacesList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +55,11 @@ func (s *Server) namespacesList(ctx context.Context, _ mcp.CallToolRequest) (*mc
 }
 
 func (s *Server) projectsList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}

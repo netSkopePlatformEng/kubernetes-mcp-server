@@ -139,6 +139,21 @@ func (s *Server) reloadKubernetesClient() error {
 	return nil
 }
 
+// getManager returns the current active Manager instance
+// In multi-cluster mode, this always gets the latest active cluster's manager
+// In single-cluster mode, this returns the cached manager
+func (s *Server) getManager() (*internalk8s.Manager, error) {
+	if s.configuration.StaticConfig.IsMultiClusterEnabled() && s.k8s != nil {
+		// Always get the current active manager from k8s to ensure we have the right cluster
+		return s.k8s.GetManager()
+	}
+	// Fall back to cached manager for single-cluster mode
+	if s.k == nil {
+		return nil, fmt.Errorf("kubernetes manager not initialized")
+	}
+	return s.k, nil
+}
+
 // validateManagerAuthentication performs a basic authentication check for the manager
 func (s *Server) validateManagerAuthentication(manager *internalk8s.Manager, clusterName string) error {
 	logger := klog.Background()
@@ -188,18 +203,20 @@ func (s *Server) ServeHTTP(httpServer *http.Server) *server.StreamableHTTPServer
 // KubernetesApiVerifyToken verifies the given token with the audience by
 // sending an TokenReview request to API Server.
 func (s *Server) KubernetesApiVerifyToken(ctx context.Context, token string, audience string) (*authenticationapiv1.UserInfo, []string, error) {
-	if s.k == nil {
-		return nil, nil, fmt.Errorf("kubernetes manager is not initialized")
+	k, err := s.getManager()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get kubernetes manager: %w", err)
 	}
-	return s.k.VerifyToken(ctx, token, audience)
+	return k.VerifyToken(ctx, token, audience)
 }
 
 // GetKubernetesAPIServerHost returns the Kubernetes API server host from the configuration.
 func (s *Server) GetKubernetesAPIServerHost() string {
-	if s.k == nil {
+	k, err := s.getManager()
+	if err != nil {
 		return ""
 	}
-	return s.k.GetAPIServerHost()
+	return k.GetAPIServerHost()
 }
 
 func (s *Server) GetEnabledTools() []string {

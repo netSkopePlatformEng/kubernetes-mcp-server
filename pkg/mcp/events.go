@@ -30,7 +30,11 @@ func (s *Server) eventsList(ctx context.Context, ctr mcp.CallToolRequest) (*mcp.
 	if namespace == nil {
 		namespace = ""
 	}
-	derived, err := s.k.Derived(ctx)
+	k, err := s.getManager()
+	if err != nil {
+		return NewTextResult("", fmt.Errorf("failed to get kubernetes manager: %v", err)), nil
+	}
+	derived, err := k.Derived(ctx)
 	if err != nil {
 		return nil, err
 	}
