@@ -53,7 +53,7 @@ func (s *Server) initClusters() []server.ServerTool {
 			mcp.WithString("cluster", mcp.Description("Name of the cluster to switch to"), mcp.Required()),
 			// Tool annotations
 			mcp.WithTitleAnnotation("Clusters: Switch"),
-			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithOpenWorldHintAnnotation(false),
 		), Handler: s.clustersSwitch},
@@ -73,7 +73,7 @@ func (s *Server) initClusters() []server.ServerTool {
 			mcp.WithBoolean("force", mcp.Description("Force refresh even if recently updated")),
 			// Tool annotations
 			mcp.WithTitleAnnotation("Clusters: Refresh"),
-			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithOpenWorldHintAnnotation(false),
 		), Handler: s.clustersRefresh},

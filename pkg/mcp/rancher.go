@@ -32,7 +32,7 @@ func (s *Server) initRancher() []server.ServerTool {
 			mcp.WithString("cluster_name", mcp.Description("Name of the cluster to download"), mcp.Required()),
 			// Tool annotations
 			mcp.WithTitleAnnotation("Rancher: Download Cluster"),
-			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithOpenWorldHintAnnotation(false),
 		), Handler: s.rancherDownloadCluster},
@@ -41,7 +41,7 @@ func (s *Server) initRancher() []server.ServerTool {
 			mcp.WithDescription("Download kubeconfigs for ALL clusters from Rancher (returns job_id for async tracking)"),
 			// Tool annotations
 			mcp.WithTitleAnnotation("Rancher: Download All Clusters (Async)"),
-			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithOpenWorldHintAnnotation(false),
 		), Handler: s.rancherDownloadAllAsync},
