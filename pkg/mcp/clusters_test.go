@@ -903,7 +903,7 @@ func TestServer_clustersRefreshMultiCluster(t *testing.T) {
 	}
 
 	// Create multi-cluster manager
-	mcm, err := kubernetes.NewMultiClusterManager(staticConfig, klog.Background())
+	mcm, err := kubernetes.NewFreshMultiClusterManager(staticConfig, klog.Background())
 	if err != nil {
 		t.Fatalf("Failed to create multi-cluster manager: %v", err)
 	}
@@ -989,15 +989,15 @@ users:
 	}
 
 	// Create multi-cluster manager
-	mcm, err := kubernetes.NewMultiClusterManager(staticConfig, klog.Background())
+	mcm, err := kubernetes.NewFreshMultiClusterManager(staticConfig, klog.Background())
 	if err != nil {
 		t.Fatalf("Failed to create multi-cluster manager: %v", err)
 	}
 
 	// Discover clusters
 	ctx := context.Background()
-	if err := mcm.DiscoverClusters(ctx); err != nil {
-		t.Fatalf("Failed to discover clusters: %v", err)
+	if err := mcm.RefreshClusters(ctx); err != nil {
+		t.Fatalf("Failed to refresh clusters: %v", err)
 	}
 
 	server := &Server{

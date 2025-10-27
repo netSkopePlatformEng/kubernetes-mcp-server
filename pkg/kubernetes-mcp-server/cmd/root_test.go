@@ -31,7 +31,7 @@ func testStream() (genericiooptions.IOStreams, *bytes.Buffer) {
 	return genericiooptions.IOStreams{
 		In:     &bytes.Buffer{},
 		Out:    out,
-		ErrOut: io.Discard,
+		ErrOut: out, // Capture stderr to the same buffer
 	}, out
 }
 
