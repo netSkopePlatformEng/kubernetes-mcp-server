@@ -18,6 +18,9 @@ COMMON_BUILD_ARGS = -ldflags "$(LD_FLAGS)"
 # GoReleaser configuration
 GORELEASER := $(shell which goreleaser 2>/dev/null)
 
+# Docker Compose detection (v2 plugin or v1 standalone)
+DOCKER_COMPOSE := $(shell docker compose version > /dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
+
 GOLANGCI_LINT = $(shell pwd)/_output/tools/bin/golangci-lint
 GOLANGCI_LINT_VERSION ?= v2.2.2
 
@@ -213,17 +216,21 @@ docker-shell: ## Open shell in running container
 
 .PHONY: compose-up
 compose-up: ## Start services with docker-compose
-	docker-compose up -d
+	$(DOCKER_COMPOSE) up -d
 
 .PHONY: compose-down
 compose-down: ## Stop services with docker-compose
-	docker-compose down
+	$(DOCKER_COMPOSE) down
 
 .PHONY: compose-logs
 compose-logs: ## Show docker-compose logs
-	docker-compose logs -f
+	$(DOCKER_COMPOSE) logs -f
 
 .PHONY: compose-rebuild
 compose-rebuild: ## Rebuild and restart with docker-compose
-	docker-compose down
-	docker-compose up -d --build
+	$(DOCKER_COMPOSE) down
+	$(DOCKER_COMPOSE) up -d --build
+
+.PHONY: docker-health
+docker-health: ## Check Docker container health status
+	docker inspect kubernetes-mcp-server --format='{{.State.Health.Status}}'

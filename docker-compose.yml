@@ -31,6 +31,30 @@ services:
       - "--log-level=${LOG_LEVEL:-2}"
       - "--list-output=${LIST_OUTPUT:-table}"
     restart: unless-stopped
+
+    # Health check configuration
+    healthcheck:
+      test: ["CMD", "/app/kubernetes-mcp-server", "--help"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # Need write access for /tmp
+
     networks:
       - mcp-network
 
