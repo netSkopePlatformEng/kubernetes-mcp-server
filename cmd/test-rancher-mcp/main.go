@@ -31,7 +31,7 @@ func main() {
 	}
 
 	// Create Rancher integration
-	rancher := kubernetes.NewRancherIntegration(cfg, mcm)
+	rancher := kubernetes.NewRancherIntegration(cfg, mcm, logger)
 
 	ctx := context.Background()
 

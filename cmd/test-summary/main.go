@@ -76,7 +76,8 @@ func summarizeResult(result interface{}) string {
 }
 
 func main() {
-	fmt.Println("=== Summary Examples ===\n")
+	fmt.Println("=== Summary Examples ===")
+	fmt.Println()
 
 	// Example 0: Actual kubectl get nodes table format
 	kubectlNodesTable := `NAME                    STATUS   ROLES           AGE    VERSION    INTERNAL-IP     EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION      CONTAINER-RUNTIME
@@ -230,12 +231,16 @@ Conditions:
 	fmt.Println("   Summary:", summarizeResult(namespaceList))
 	fmt.Println()
 
-	fmt.Println("\n=== Example Job Results Output ===\n")
+	fmt.Println()
+	fmt.Println("=== Example Job Results Output ===")
+	fmt.Println()
 
 	// Simulate what the actual output would look like
-	fmt.Println("Job Results (Page 1 of 15)\n")
+	fmt.Println("Job Results (Page 1 of 15)")
+	fmt.Println()
 	fmt.Println("Job ID: 6fde8a6f-9c3e-48d3-b711-a3625a6f48f6")
-	fmt.Println("State: succeeded\n")
+	fmt.Println("State: succeeded")
+	fmt.Println()
 
 	// Additional realistic example: Pod list in table format
 	kubectlPodsTable := `NAME                                READY   STATUS    RESTARTS   AGE
