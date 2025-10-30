@@ -77,9 +77,28 @@ checksum:
 snapshot:
   version_template: "{{ .Tag }}-next-{{ .ShortCommit }}"
 
-# Docker configuration is handled by the reusable GitHub Actions workflow
-# Images are pushed to Netskope Artifactory:
-#   - artifactory.netskope.io/pe-sys-docker/kubernetes-mcp-server (commercial only)
+# Docker configuration
+# Images are built by GoReleaser and pushed to Netskope Artifactory by the reusable workflow
+dockers:
+  - id: kubernetes-mcp-server
+    image_templates:
+      - "artifactory.netskope.io/pe-sys-docker/kubernetes-mcp-server:{{ .Version }}"
+      - "artifactory.netskope.io/pe-sys-docker/kubernetes-mcp-server:latest"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--platform=linux/arm64"
+      - "--pull"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.description=Kubernetes Model Context Protocol (MCP) server for AI agents"
+      - "--label=org.opencontainers.image.url=https://github.com/netSkopePlatformEng/kubernetes-mcp-server"
+      - "--label=org.opencontainers.image.source=https://github.com/netSkopePlatformEng/kubernetes-mcp-server"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.vendor=Netskope"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
 
 # Homebrew tap configuration
 brews:

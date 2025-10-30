@@ -15,7 +15,8 @@ import (
 )
 
 func main() {
-	fmt.Println("=== Rancher Async Download Test ===\n")
+	fmt.Println("=== Rancher Async Download Test ===")
+	fmt.Println()
 
 	// Create Rancher config
 	cfg := &config.RancherConfig{
@@ -41,7 +42,7 @@ func main() {
 	}
 
 	// Create Rancher integration
-	rancher := kubernetes.NewRancherIntegration(cfg, mcm)
+	rancher := kubernetes.NewRancherIntegration(cfg, mcm, logger)
 
 	// Test 1: List clusters
 	fmt.Println("📋 Test 1: Listing clusters from Rancher...")

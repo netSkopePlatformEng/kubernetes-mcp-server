@@ -263,23 +263,31 @@ spec:
 
 ## Health Checks
 
-The server doesn't currently expose a dedicated health endpoint. You can check if it's running:
+The server exposes a `/healthz` endpoint for health checks:
 
 ```bash
 # Check if server is listening
-curl http://localhost:8080/mcp
+curl http://localhost:8080/healthz
 
-# Check container health
+# Check container health (using built-in HEALTHCHECK)
+make docker-health
+# Or directly:
 docker inspect kubernetes-mcp-server --format='{{.State.Health.Status}}'
+
+# View health check logs
+docker inspect kubernetes-mcp-server --format='{{json .State.Health}}' | jq
 ```
 
 ## Security Considerations
 
 1. **Read-only mounts**: Kubeconfig volumes are mounted read-only for security
-2. **Secrets**: Use Docker secrets or environment variables for sensitive data
-3. **Network isolation**: Use Docker networks to isolate the container
-4. **User permissions**: Consider running as non-root user in production
-5. **Token rotation**: Rancher tokens should be rotated regularly
+2. **Non-root user**: Container runs as UID 1000 (non-root) for improved security
+3. **Health checks**: Built-in HEALTHCHECK monitors container status
+4. **Resource limits**: CPU and memory limits configured in docker-compose.yml
+5. **Security options**: `no-new-privileges` prevents privilege escalation
+6. **Secrets**: Use Docker secrets or environment variables for sensitive data
+7. **Network isolation**: Use Docker networks to isolate the container
+8. **Token rotation**: Rancher tokens should be rotated regularly
 
 ## Next Steps
 
